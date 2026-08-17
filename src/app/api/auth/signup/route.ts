@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { JsonDb } from '@/lib/db';
 import { signToken } from '@/lib/jwt';
 
 export async function POST(request: Request) {
@@ -17,7 +16,10 @@ export async function POST(request: Request) {
     }
 
     if (typeof name !== 'string' || name.trim().length === 0) {
-      return NextResponse.json({ error: 'Name must be a non-empty string.' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Name must be a non-empty string.' },
+        { status: 400 }
+      );
     }
 
     if (typeof password !== 'string' || password.length < 6) {
@@ -28,21 +30,19 @@ export async function POST(request: Request) {
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
-    const cleanName  = String(name).trim();
+    const cleanName = String(name).trim();
 
     // --- Supabase Auth signup ---
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: cleanEmail,
       password,
       options: {
-        // Store name in Supabase Auth user metadata so it's accessible without
-        // an extra round-trip to the profiles table.
+        // Store name in Auth user metadata — accessible without a profiles round-trip.
         data: { full_name: cleanName },
       },
     });
 
     if (signUpError) {
-      // Surface Supabase errors clearly instead of swallowing them.
       const status =
         signUpError.message?.toLowerCase().includes('already registered') ? 409 : 400;
       return NextResponse.json({ error: signUpError.message }, { status });
@@ -50,47 +50,32 @@ export async function POST(request: Request) {
 
     const supabaseUser = data?.user;
     if (!supabaseUser) {
-      // Supabase returned no error but also no user — unexpected.
       return NextResponse.json(
         { error: 'Signup did not return a user. Please try again.' },
         { status: 500 }
       );
     }
 
-    const userId = supabaseUser.id; // Supabase UUID — used as canonical userId
+    const userId = supabaseUser.id;
 
-    // --- Upsert profile row (stores name; non-fatal if table absent) ---
+    // --- Upsert profile row (non-fatal if table is absent or RLS blocks it) ---
     try {
-      await supabase.from('profiles').upsert(
-        { id: userId, email: cleanEmail, full_name: cleanName, updated_at: new Date().toISOString() },
-        { onConflict: 'id' }
-      );
+      await supabase
+        .from('profiles')
+        .upsert(
+          {
+            id: userId,
+            email: cleanEmail,
+            full_name: cleanName,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
     } catch {
-      // profiles table may not exist yet; don't fail signup over it.
+      // profiles table may not exist yet — don't fail signup over it.
     }
 
-    // --- Seed blank SMTP settings so Settings page works immediately ---
-    try {
-      const existing = await JsonDb.findOne('settings', { userId });
-      if (!existing) {
-        await JsonDb.insert('settings', {
-          id: userId,
-          userId,
-          smtpHost: '',
-          smtpPort: 587,
-          smtpUser: '',
-          smtpPass: '',
-          smtpFromEmail: '',
-          smtpFrom: cleanName,
-        });
-      }
-    } catch {
-      // Non-fatal — user can configure SMTP later.
-    }
-
-    // --- Issue the existing auth_token cookie so all other routes keep working ---
-    // The token carries the same payload shape the rest of the app (auth-middleware,
-    // /api/auth/me, etc.) already relies on — only the source of the userId changed.
+    // --- Issue auth_token cookie so all existing routes keep working ---
     const token = signToken({ userId, email: cleanEmail });
 
     const response = NextResponse.json({
