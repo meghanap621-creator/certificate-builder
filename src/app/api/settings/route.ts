@@ -19,7 +19,7 @@ export async function GET() {
         smtpPort: 587,
         smtpUser: '',
         smtpPass: '',
-        smtpSecure: false,
+        smtpFromEmail: '',
         smtpFrom: user.name,
       };
     }
@@ -44,11 +44,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
     }
 
-    const { smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure, smtpFrom } = await request.json();
+    const { smtpHost, smtpPort, smtpUser, smtpPass, smtpFromEmail, smtpFrom } = await request.json();
 
-    if (!smtpHost || !smtpPort || !smtpUser) {
+    if (!smtpHost || !smtpPort || !smtpUser || !smtpFromEmail) {
       return NextResponse.json(
-        { error: 'SMTP Host, Port, and User are required.' },
+        { error: 'SMTP Host, Port, Username, and Sender Email are required.' },
         { status: 400 }
       );
     }
@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       smtpPort: parseInt(smtpPort, 10),
       smtpUser: smtpUser.trim(),
       smtpPass: finalPassword ? finalPassword.trim() : '',
-      smtpSecure: !!smtpSecure,
+      smtpFromEmail: smtpFromEmail.trim(),
       smtpFrom: smtpFrom ? smtpFrom.trim() : user.name,
     };
 

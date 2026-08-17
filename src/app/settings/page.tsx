@@ -9,7 +9,7 @@ export default function SettingsPage() {
   const [smtpPort, setSmtpPort] = useState(587);
   const [smtpUser, setSmtpUser] = useState('');
   const [smtpPass, setSmtpPass] = useState('');
-  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [smtpFromEmail, setSmtpFromEmail] = useState('');
   const [smtpFrom, setSmtpFrom] = useState('');
 
   const [saving, setSaving] = useState(false);
@@ -27,7 +27,7 @@ export default function SettingsPage() {
             setSmtpPort(data.settings.smtpPort || 587);
             setSmtpUser(data.settings.smtpUser || '');
             setSmtpPass(data.settings.smtpPass || '');
-            setSmtpSecure(!!data.settings.smtpSecure);
+            setSmtpFromEmail(data.settings.smtpFromEmail || '');
             setSmtpFrom(data.settings.smtpFrom || '');
           }
         }
@@ -52,7 +52,7 @@ export default function SettingsPage() {
           smtpPort,
           smtpUser,
           smtpPass,
-          smtpSecure,
+          smtpFromEmail,
           smtpFrom,
         }),
       });
@@ -138,7 +138,7 @@ export default function SettingsPage() {
               <label style={{ fontSize: '14px', fontWeight: 500, color: '#9ca3af' }}>SMTP Username / Login</label>
               <input
                 type="text"
-                placeholder="postmaster@yourdomain.com or email address"
+                placeholder="For Resend: resend  |  Others: your email or login"
                 value={smtpUser}
                 onChange={(e) => setSmtpUser(e.target.value)}
                 style={{
@@ -190,22 +190,27 @@ export default function SettingsPage() {
               />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 500, color: '#9ca3af' }}>Sender Email Address</label>
               <input
-                type="checkbox"
-                id="smtpSecure"
-                checked={smtpSecure}
-                onChange={(e) => setSmtpSecure(e.target.checked)}
+                type="email"
+                placeholder="certificates@yourdomain.com"
+                value={smtpFromEmail}
+                onChange={(e) => setSmtpFromEmail(e.target.value)}
                 style={{
-                  width: '18px',
-                  height: '18px',
-                  cursor: 'pointer',
-                  accentColor: '#6366f1',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  backgroundColor: 'rgba(15, 21, 36, 0.8)',
+                  color: '#fff',
+                  outline: 'none',
                 }}
+                required
               />
-              <label htmlFor="smtpSecure" style={{ fontSize: '14px', color: '#d1d5db', cursor: 'pointer', userSelect: 'none' }}>
-                Use SSL Connection (Check if using port 465, uncheck for port 587 or 25)
-              </label>
+              <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                Must be a verified sender address in your email provider (e.g. Resend verified domain).
+                This is the address that appears in recipients&apos; inboxes — not the SMTP username above.
+              </span>
             </div>
 
             <button

@@ -46,26 +46,39 @@ export async function sendEmail(
   if (!settings || !settings.smtpHost || !settings.smtpUser || !settings.smtpPass) {
     throw new Error('SMTP configuration is missing. Go to Settings to configure your email provider.');
   }
+  if (!settings.smtpFromEmail) {
+    throw new Error('Sender email address (smtpFromEmail) is not configured. Go to Settings and enter your verified sender address.');
+  }
 
   // 4. Create Nodemailer Transport
-  // Supports TLS and standard ports (465 secure, 587 STARTTLS, 25)
+  // Security is determined by port:
+  //   465  → implicit TLS  (secure: true)
+  //   587  → STARTTLS      (secure: false, requireTLS: true)
+  //   25   → plain SMTP    (secure: false)
+  const port = settings.smtpPort ?? 587;
+  const secure = port === 465;
+  const requireTLS = port === 587;
+
   const transporter = nodemailer.createTransport({
     host: settings.smtpHost,
-    port: settings.smtpPort,
-    secure: settings.smtpSecure,
+    port,
+    secure,
+    ...(requireTLS ? { requireTLS: true } : {}),
     auth: {
       user: settings.smtpUser,
       pass: settings.smtpPass,
     },
     tls: {
-      rejectUnauthorized: false, // bypass SSL certificate verification errors for local testing
+      minVersion: 'TLSv1.2',
     },
   });
 
   // 5. Build and send mail message
+  // smtpUser is the SMTP auth credential (e.g. "resend") — NOT used as the From address.
+  // smtpFromEmail is the verified sender address that appears in the From header.
   const fromName = settings.smtpFrom || 'Certificate Builder';
   const mailOptions = {
-    from: `"${fromName}" <${settings.smtpUser}>`,
+    from: `"${fromName}" <${settings.smtpFromEmail}>`,
     to: recipientEmail,
     subject: subject,
     text: body, // plain text

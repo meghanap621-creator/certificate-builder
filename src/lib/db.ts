@@ -73,10 +73,11 @@ export interface Settings {
   userId: string;
   smtpHost: string;
   smtpPort: number;
-  smtpUser: string;
-  smtpPass: string;
-  smtpSecure: boolean;
-  smtpFrom: string;
+  smtpUser: string;       // SMTP auth login (e.g. "resend" for Resend SMTP)
+  smtpPass: string;       // SMTP auth password / API key – never logged or exposed
+  smtpFromEmail: string;  // Verified sender address used in the From header
+  smtpFrom: string;       // Sender display name used in the From header
+  smtpSecure?: boolean;   // Legacy – security is now derived from port; kept for backward compat
 }
 
 // Global In-Memory Concurrency Locks to serialize writes per table
