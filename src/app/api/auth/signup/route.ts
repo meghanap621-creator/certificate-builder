@@ -38,6 +38,7 @@ export async function POST(request: Request) {
 
     // Initialize blank SMTP Settings for the user
     await JsonDb.insert('settings', {
+      id: userId,
       userId,
       smtpHost: '',
       smtpPort: 587,

@@ -69,6 +69,7 @@ export interface DeliveryLog {
 }
 
 export interface Settings {
+  id: string; // Matches userId
   userId: string;
   smtpHost: string;
   smtpPort: number;
@@ -92,7 +93,7 @@ export class JsonDb {
   public static async init() {
     try {
       await fs.mkdir(this.dbDir, { recursive: true });
-      const tables = ['users', 'templates', 'campaigns', 'students', 'delivery_logs', 'settings'];
+      const tables = ['users', 'templates', 'campaigns', 'students', 'delivery_logs', 'settings', 'mappings'];
       for (const table of tables) {
         const filePath = this.getFilePath(table);
         try {

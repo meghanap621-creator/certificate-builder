@@ -1,5 +1,5 @@
 import { JsonDb, Campaign, Student, Template, DeliveryLog } from './db';
-import { saveStudentPDF } from './pdf';
+import { saveStudentPDF, replacePlaceholders } from './pdf';
 import { sendEmail } from './smtp';
 import path from 'path';
 

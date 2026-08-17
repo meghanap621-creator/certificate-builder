@@ -13,6 +13,7 @@ export async function GET() {
     if (!settings) {
       // Return default empty structure
       settings = {
+        id: user.id,
         userId: user.id,
         smtpHost: '',
         smtpPort: 587,
@@ -26,7 +27,7 @@ export async function GET() {
     // Hide password for safety, but indicate if it is set
     const sanitizedSettings = {
       ...settings,
-      smtpPass: settings.smtpPass ? '********' : '',
+      smtpPass: settings!.smtpPass ? '********' : '',
     };
 
     return NextResponse.json({ settings: sanitizedSettings });
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     }
 
     const newSettings: Settings = {
+      id: user.id,
       userId: user.id,
       smtpHost: smtpHost.trim(),
       smtpPort: parseInt(smtpPort, 10),
