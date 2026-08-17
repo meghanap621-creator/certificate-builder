@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { JsonDb, User } from '@/lib/db';
-import { comparePassword, signToken } from '@/lib/jwt';
+import { supabase } from '@/lib/supabase';
+import { signToken } from '@/lib/jwt';
 
 export async function POST(request: Request) {
   try {
-    const { email, password } = await request.json();
+    const body = await request.json();
+    const { email, password } = body ?? {};
 
+    // --- Validation ---
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email and password are required.' },
@@ -13,36 +15,61 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find user
-    const user = await JsonDb.findOne<User>('users', { email: email.toLowerCase().trim() });
-    if (!user) {
+    // --- Supabase Auth ---
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: String(email).toLowerCase().trim(),
+      password: String(password),
+    });
+
+    if (signInError || !data?.user) {
+      // Always return the same generic message to avoid leaking whether the
+      // email exists in the system.
       return NextResponse.json(
         { error: 'Invalid email or password.' },
         { status: 401 }
       );
     }
 
-    // Compare passwords
-    const isMatch = await comparePassword(password, user.passwordHash);
-    if (!isMatch) {
-      return NextResponse.json(
-        { error: 'Invalid email or password.' },
-        { status: 401 }
-      );
+    const supabaseUser = data.user;
+    const userId      = supabaseUser.id;
+    const userEmail   = supabaseUser.email ?? String(email).toLowerCase().trim();
+
+    // --- Resolve display name ---
+    // Priority: profiles table → Supabase user_metadata → email prefix
+    let displayName: string = userEmail;
+
+    try {
+      const { data: profileRow } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', userId)
+        .single();
+
+      if (profileRow?.full_name) {
+        displayName = profileRow.full_name;
+      } else {
+        // Fall back to the name stored in Supabase Auth user metadata (set at signup)
+        const metaName =
+          supabaseUser.user_metadata?.full_name ??
+          supabaseUser.user_metadata?.name;
+        if (metaName) displayName = metaName;
+      }
+    } catch {
+      // profiles table may not exist — non-fatal, keep email as name.
     }
 
-    // Sign JWT
-    const token = signToken({ userId: user.id, email: user.email });
+    // --- Issue auth_token cookie (same shape as before so all routes keep working) ---
+    const token = signToken({ userId, email: userEmail });
 
     const response = NextResponse.json({
       message: 'Login successful!',
-      user: { id: user.id, email: user.email, name: user.name },
+      user: { id: userId, email: userEmail, name: displayName },
     });
 
     response.cookies.set('auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60, // 7 days
       path: '/',
     });
