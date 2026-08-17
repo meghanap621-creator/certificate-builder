@@ -28,7 +28,7 @@ export default function DashboardPage() {
   // Stats calculation
   const totalCampaigns = campaigns.length;
   const totalTemplates = templates.length;
-  
+
   // Calculate sent/completed certificates across all campaigns
   const totalSent = logs.filter(l => l.emailStatus === 'Sent').length;
   const totalFailed = logs.filter(l => l.emailStatus === 'Failed').length;
@@ -137,8 +137,8 @@ export default function DashboardPage() {
                   cursor: 'pointer',
                   transition: 'transform 0.2s, border 0.2s',
                 }}
-                onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(99, 102, 241, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
                 >
                   <Icons.Campaigns size={24} style={{ color: '#6366f1' }} />
                   <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#f3f4f6' }}>New Certificate Campaign</h3>
@@ -158,8 +158,8 @@ export default function DashboardPage() {
                   cursor: 'pointer',
                   transition: 'transform 0.2s, border 0.2s',
                 }}
-                onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(236, 72, 153, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(236, 72, 153, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
                 >
                   <Icons.Templates size={24} style={{ color: '#ec4899' }} />
                   <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#f3f4f6' }}>Template Designer</h3>
@@ -179,8 +179,8 @@ export default function DashboardPage() {
                   cursor: 'pointer',
                   transition: 'transform 0.2s, border 0.2s',
                 }}
-                onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(6, 182, 212, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = 'rgba(6, 182, 212, 0.3)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)'; e.currentTarget.style.transform = 'none'; }}
                 >
                   <Icons.Settings size={24} style={{ color: '#06b6d4' }} />
                   <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#f3f4f6' }}>Configure Mail Deliveries</h3>
@@ -196,44 +196,49 @@ export default function DashboardPage() {
             {campaigns.length === 0 ? (
               <p style={{ color: '#9ca3af', fontSize: '14px', textAlign: 'center', padding: '24px' }}>No campaigns initialized yet.</p>
             ) : (
-                <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                      <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Campaign Name</th>
-                      <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Template Bind</th>
-                      <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Status</th>
-                      <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Created Date</th>
-                      <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {campaigns.slice(0, 5).map((camp) => {
-                      const tpl = templates.find((t) => t.id === camp.templateId);
-                      let statusClass = 'badge-secondary';
-                      if (camp.status === 'Completed') statusClass = 'badge-success';
-                      if (camp.status === 'Processing') statusClass = 'badge-primary';
-                      if (camp.status === 'Failed') statusClass = 'badge-danger';
+              <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Campaign Name</th>
+                    <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Template Bind</th>
+                    <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Status</th>
+                    <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Created Date</th>
+                    <th style={{ padding: '12px 16px', color: '#9ca3af', fontWeight: 600 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {campaigns.slice(0, 5).map((camp) => {
+                    const tpl = templates.find((t) => t.id === camp.templateId);
+                    let statusClass = 'badge-secondary';
+                    if (camp.status === 'Completed') statusClass = 'badge-success';
+                    if (camp.status === 'Processing') statusClass = 'badge-primary';
+                    if (camp.status === 'Failed') statusClass = 'badge-danger';
 
-                      return (
-                        <tr key={camp.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                          <td style={{ padding: '12px 16px', fontWeight: 500, color: '#f3f4f6' }}>{camp.name}</td>
-                          <td style={{ padding: '12px 16px', color: '#9ca3af' }}>{tpl?.name || 'Unbound'}</td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <span className={`badge ${statusClass}`}>{camp.status}</span>
-                          </td>
-                          <td style={{ padding: '12px 16px', color: '#9ca3af' }}>
-                            {new Date(camp.createdAt).toLocaleDateString()}
-                          </td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <Link href={`/campaigns/${camp.id}`} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
-                              Manage Campaign
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                    return (
+                      <tr key={camp.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 500, color: '#f3f4f6' }}>{camp.name}</td>
+                        <td style={{ padding: '12px 16px', color: '#9ca3af' }}>{tpl?.name || 'Unbound'}</td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <span className={`badge ${statusClass}`}>{camp.status}</span>
+                        </td>
+                        <td style={{ padding: '12px 16px', color: '#9ca3af' }}>
+                          {new Intl.DateTimeFormat('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            timeZone: 'UTC',
+                          }).format(new Date(camp.createdAt))}
+                        </td>
+                        <td style={{ padding: '12px 16px' }}>
+                          <Link href={`/campaigns/${camp.id}`} className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: '12px' }}>
+                            Manage Campaign
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
