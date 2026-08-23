@@ -18,7 +18,8 @@ export interface Template {
   backgroundImage?: string; // base64 or file path
   width: number;
   height: number;
-  elements: any[]; // Text, shape, image elements
+  elements: any[]; 
+  certificateBody?: string;// Text, shape, image elements
   createdAt: string;
   updatedAt: string;
 }

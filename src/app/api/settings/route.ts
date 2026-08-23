@@ -1,92 +1,268 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth-middleware';
-import { JsonDb, Settings } from '@/lib/db';
+import { supabaseAdmin } from '@/lib/supabase-admin';
 
 export async function GET() {
   try {
     const user = await getAuthUser();
+
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized.' },
+        { status: 401 }
+      );
     }
 
-    let settings = await JsonDb.findOne<Settings>('settings', { userId: user.id });
-    if (!settings) {
-      // Return default empty structure
-      settings = {
-        id: user.id,
-        userId: user.id,
-        smtpHost: '',
-        smtpPort: 587,
-        smtpUser: '',
-        smtpPass: '',
-        smtpFromEmail: '',
-        smtpFrom: user.name,
-      };
+    const { data: settings, error } = await supabaseAdmin
+      .from('settings')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fetch settings error:', error);
+
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
     }
 
-    // Hide password for safety, but indicate if it is set
-    const sanitizedSettings = {
-      ...settings,
-      smtpPass: settings!.smtpPass ? '********' : '',
-    };
+    /*
+     * Return defaults if the user has no settings yet.
+     */
+    const result = settings
+      ? {
+          id: settings.id,
+          userId: settings.user_id,
+          smtpHost: settings.smtp_host || '',
+          smtpPort: Number(settings.smtp_port) || 587,
+          smtpUser: settings.smtp_user || '',
+          smtpPass: settings.smtp_pass
+            ? '********'
+            : '',
+          smtpFromEmail:
+            settings.smtp_from_email || '',
+          smtpFrom:
+            settings.smtp_from ||
+            user.name ||
+            '',
+        }
+      : {
+          id: user.id,
+          userId: user.id,
+          smtpHost: '',
+          smtpPort: 587,
+          smtpUser: '',
+          smtpPass: '',
+          smtpFromEmail: '',
+          smtpFrom: user.name || '',
+        };
 
-    return NextResponse.json({ settings: sanitizedSettings });
-  } catch (err) {
-    console.error('Fetch settings error:', err);
-    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
+    return NextResponse.json({
+      settings: result,
+    });
+  } catch (err: any) {
+    console.error(
+      'Fetch settings error:',
+      err
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          err?.message ||
+          'Internal server error.',
+      },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
     const user = await getAuthUser();
+
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized.' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized.' },
+        { status: 401 }
+      );
     }
 
-    const { smtpHost, smtpPort, smtpUser, smtpPass, smtpFromEmail, smtpFrom } = await request.json();
+    const body = await request.json();
 
-    if (!smtpHost || !smtpPort || !smtpUser || !smtpFromEmail) {
+    const {
+      smtpHost,
+      smtpPort,
+      smtpUser,
+      smtpPass,
+      smtpFromEmail,
+      smtpFrom,
+    } = body;
+
+    /*
+     * Validate required fields.
+     */
+    if (
+      !smtpHost ||
+      !smtpPort ||
+      !smtpUser ||
+      !smtpFromEmail
+    ) {
       return NextResponse.json(
-        { error: 'SMTP Host, Port, Username, and Sender Email are required.' },
+        {
+          error:
+            'SMTP Host, Port, Username, and Sender Email are required.',
+        },
         { status: 400 }
       );
     }
 
-    let settings = await JsonDb.findOne<Settings>('settings', { userId: user.id });
+    const parsedPort = Number(smtpPort);
 
-    // Determine password update logic
-    let finalPassword = smtpPass;
-    if (settings && smtpPass === '********') {
-      finalPassword = settings.smtpPass; // Keep original password if unchanged
+    if (
+      !Number.isInteger(parsedPort) ||
+      parsedPort <= 0 ||
+      parsedPort > 65535
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'SMTP port must be a valid number between 1 and 65535.',
+        },
+        { status: 400 }
+      );
     }
 
-    const newSettings: Settings = {
-      id: user.id,
-      userId: user.id,
-      smtpHost: smtpHost.trim(),
-      smtpPort: parseInt(smtpPort, 10),
-      smtpUser: smtpUser.trim(),
-      smtpPass: finalPassword ? finalPassword.trim() : '',
-      smtpFromEmail: smtpFromEmail.trim(),
-      smtpFrom: smtpFrom ? smtpFrom.trim() : user.name,
+    /*
+     * Get existing settings so that
+     * ******** is not saved as the password.
+     */
+    const {
+      data: existingSettings,
+      error: existingError,
+    } = await supabaseAdmin
+      .from('settings')
+      .select('*')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (existingError) {
+      console.error(
+        'Existing settings lookup error:',
+        existingError
+      );
+
+      return NextResponse.json(
+        { error: existingError.message },
+        { status: 500 }
+      );
+    }
+
+    let finalPassword = '';
+
+    if (
+      smtpPass &&
+      smtpPass !== '********'
+    ) {
+      finalPassword =
+        String(smtpPass).trim();
+    } else if (existingSettings?.smtp_pass) {
+      finalPassword =
+        existingSettings.smtp_pass;
+    }
+
+    /*
+     * Gmail SMTP requires a password.
+     */
+    if (!finalPassword) {
+      return NextResponse.json(
+        {
+          error:
+            'SMTP password is required. For Gmail, use a Google App Password.',
+        },
+        { status: 400 }
+      );
+    }
+
+    /*
+     * Prepare Supabase record.
+     */
+    const settingsData = {
+      user_id: user.id,
+      smtp_host:
+        String(smtpHost).trim(),
+
+      smtp_port:
+        parsedPort,
+
+      smtp_user:
+        String(smtpUser).trim(),
+
+      smtp_pass:
+        finalPassword,
+
+      smtp_from_email:
+        String(smtpFromEmail).trim(),
+
+      smtp_from:
+        smtpFrom
+          ? String(smtpFrom).trim()
+          : user.name || '',
+
+      updated_at:
+        new Date().toISOString(),
     };
 
-    if (settings) {
-      await JsonDb.update<Settings>('settings', settings.userId, newSettings); // settings.userId acts as key
-      // Note: we can use a custom update or save
-      // Let's rewrite the settings table with updated record for this user
-      const allSettings = await JsonDb.read<Settings>('settings');
-      const filtered = allSettings.filter((s) => s.userId !== user.id);
-      filtered.push(newSettings);
-      await JsonDb.write<Settings>('settings', filtered);
-    } else {
-      await JsonDb.insert<Settings>('settings', newSettings);
+    /*
+     * Upsert means:
+     * - create settings if they don't exist
+     * - update them if they already exist
+     */
+    const {
+      error: saveError,
+    } = await supabaseAdmin
+      .from('settings')
+      .upsert(
+        settingsData,
+        {
+          onConflict: 'user_id',
+        }
+      );
+
+    if (saveError) {
+      console.error(
+        'Save settings error:',
+        saveError
+      );
+
+      return NextResponse.json(
+        {
+          error:
+            saveError.message,
+        },
+        { status: 500 }
+      );
     }
 
-    return NextResponse.json({ message: 'Settings updated successfully!' });
-  } catch (err) {
-    console.error('Update settings error:', err);
-    return NextResponse.json({ error: 'Internal server error.' }, { status: 500 });
+    return NextResponse.json({
+      message:
+        'Settings updated successfully!',
+    });
+  } catch (err: any) {
+    console.error(
+      'Update settings error:',
+      err
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          err?.message ||
+          'Internal server error.',
+      },
+      { status: 500 }
+    );
   }
 }

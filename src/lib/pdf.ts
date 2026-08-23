@@ -1,76 +1,259 @@
-import { PDFDocument, StandardFonts, rgb, PDFPage } from 'pdf-lib';
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+} from 'pdf-lib';
+
 import fs from 'fs/promises';
 import path from 'path';
-import { Template, Student } from './db';
 
-// Helper to parse hex colors to pdf-lib rgb format
-export function parseColor(hex?: string) {
-  if (!hex) return rgb(0, 0, 0); // Default black
-  const cleanHex = hex.replace('#', '');
-  const r = parseInt(cleanHex.substring(0, 2), 16) / 255;
-  const g = parseInt(cleanHex.substring(2, 4), 16) / 255;
-  const b = parseInt(cleanHex.substring(4, 6), 16) / 255;
-  return rgb(isNaN(r) ? 0 : r, isNaN(g) ? 0 : g, isNaN(b) ? 0 : b);
+import {
+  Template,
+  Student,
+} from './db';
+
+/* --------------------------------------------------
+   COLORS
+-------------------------------------------------- */
+
+export function parseColor(
+  hex?: string
+) {
+  if (!hex) {
+    return rgb(0, 0, 0);
+  }
+
+  const cleanHex =
+    hex.replace('#', '');
+
+  const r =
+    parseInt(
+      cleanHex.substring(0, 2),
+      16
+    ) / 255;
+
+  const g =
+    parseInt(
+      cleanHex.substring(2, 4),
+      16
+    ) / 255;
+
+  const b =
+    parseInt(
+      cleanHex.substring(4, 6),
+      16
+    ) / 255;
+
+  return rgb(
+    isNaN(r) ? 0 : r,
+    isNaN(g) ? 0 : g,
+    isNaN(b) ? 0 : b
+  );
 }
 
-// Word wrapping helper in PDF points space
-export function wrapText(text: string, maxWidth: number, font: any, fontSize: number): string[] {
-  const words = text.split(/\s+/);
-  const lines: string[] = [];
-  let currentLine = '';
+/* --------------------------------------------------
+   WORD WRAPPING
+-------------------------------------------------- */
 
-  for (const word of words) {
-    const testLine = currentLine ? `${currentLine} ${word}` : word;
-    const testWidth = font.widthOfTextAtSize(testLine, fontSize);
-    if (testWidth > maxWidth && currentLine) {
-      lines.push(currentLine);
-      currentLine = word;
-    } else {
-      currentLine = testLine;
+export function wrapText(
+  text: string,
+  maxWidth: number,
+  font: any,
+  fontSize: number
+): string[] {
+  const paragraphs =
+    text.split(/\r?\n/);
+
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    const words =
+      paragraph.split(/\s+/);
+
+    let currentLine = '';
+
+    if (
+      words.length === 1 &&
+      words[0] === ''
+    ) {
+      lines.push('');
+      continue;
+    }
+
+    for (const word of words) {
+      const testLine =
+        currentLine
+          ? `${currentLine} ${word}`
+          : word;
+
+      const width =
+        font.widthOfTextAtSize(
+          testLine,
+          fontSize
+        );
+
+      if (
+        width > maxWidth &&
+        currentLine
+      ) {
+        lines.push(
+          currentLine
+        );
+
+        currentLine = word;
+      } else {
+        currentLine =
+          testLine;
+      }
+    }
+
+    if (currentLine) {
+      lines.push(
+        currentLine
+      );
     }
   }
-  if (currentLine) {
-    lines.push(currentLine);
-  }
+
   return lines;
 }
 
-// Replace template placeholders like {{student_name}} with actual student data
-export function replacePlaceholders(text: string, student: Student, mappings: Record<string, string>): string {
-  // Available variables
-  const data: Record<string, string> = {
-    student_name: student.name,
-    email: student.email,
-    college_name: student.collegeName || '',
-    course: student.course || '',
-    department: student.department || '',
-    internship_role: student.role || '',
-    organization_name: student.organizationName || '',
-    start_date: student.startDate || '',
-    end_date: student.endDate || '',
-    certificate_date: student.certDate || '',
-    certificate_id: student.certId || '',
-    ...(student.customFields || {}),
+/* --------------------------------------------------
+   PLACEHOLDER DATA
+-------------------------------------------------- */
+
+export function replacePlaceholders(
+  text: string,
+  student: Student,
+  mappings: Record<string, string>
+): string {
+  const data: Record<
+    string,
+    string
+  > = {
+    student_name:
+      student.name || '',
+
+    email:
+      student.email || '',
+
+    college_name:
+      student.collegeName || '',
+
+    course:
+      student.course || '',
+
+    department:
+      student.department || '',
+
+    internship_role:
+      student.role || '',
+
+    organization_name:
+      student.organizationName ||
+      '',
+
+    start_date:
+      student.startDate || '',
+
+    end_date:
+      student.endDate || '',
+
+    certificate_date:
+      student.certDate || '',
+
+    certificate_id:
+      student.certId || '',
+
+    ...(student.customFields ||
+      {}),
   };
 
-  // Perform replacing
-  let replaced = text;
-  Object.entries(data).forEach(([key, val]) => {
-    // Dynamic mapping check
-    const mappedHeader = mappings[key];
-    const value = val || '';
-    
-    // Replace direct field e.g. {{student_name}}
-    replaced = replaced.replace(new RegExp(`{{\\s*${key}\\s*}}`, 'gi'), value);
+  let replaced =
+    text || '';
 
-    // Also replace the mapped header name if mapped e.g. if {{Name}} is used in custom
-    if (mappedHeader) {
-      replaced = replaced.replace(new RegExp(`{{\\s*${mappedHeader}\\s*}}`, 'gi'), value);
+  Object.entries(
+    data
+  ).forEach(
+    ([key, value]) => {
+      const safeValue =
+        value || '';
+
+      replaced =
+        replaced.replace(
+          new RegExp(
+            `{{\\s*${escapeRegExp(
+              key
+            )}\\s*}}`,
+            'gi'
+          ),
+          safeValue
+        );
+
+      const mappedHeader =
+        mappings?.[key];
+
+      if (
+        mappedHeader
+      ) {
+        replaced =
+          replaced.replace(
+            new RegExp(
+              `{{\\s*${escapeRegExp(
+                mappedHeader
+              )}\\s*}}`,
+              'gi'
+            ),
+            safeValue
+          );
+      }
     }
-  });
+  );
 
   return replaced;
 }
+
+function escapeRegExp(
+  value: string
+) {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&'
+  );
+}
+
+/* --------------------------------------------------
+   AUTO FIT
+-------------------------------------------------- */
+
+function getAutoFitFontSize(
+  text: string,
+  font: any,
+  requestedSize: number,
+  minSize: number,
+  maxWidth: number
+) {
+  let size =
+    requestedSize;
+
+  while (
+    size > minSize &&
+    font.widthOfTextAtSize(
+      text,
+      size
+    ) > maxWidth
+  ) {
+    size -= 1;
+  }
+
+  return Math.max(
+    size,
+    minSize
+  );
+}
+
+/* --------------------------------------------------
+   PDF GENERATOR
+-------------------------------------------------- */
 
 export async function generatePDF(
   template: Template,
@@ -79,192 +262,797 @@ export async function generatePDF(
 ): Promise<Uint8Array> {
   let pdfDoc: PDFDocument;
 
-  // Set up fonts map
-  const embedFonts = async (doc: PDFDocument) => {
-    return {
-      helvetica: await doc.embedFont(StandardFonts.Helvetica),
-      helveticaBold: await doc.embedFont(StandardFonts.HelveticaBold),
-      helveticaOblique: await doc.embedFont(StandardFonts.HelveticaOblique),
-      timesRoman: await doc.embedFont(StandardFonts.TimesRoman),
-      timesRomanBold: await doc.embedFont(StandardFonts.TimesRomanBold),
-      timesRomanItalic: await doc.embedFont(StandardFonts.TimesRomanItalic),
-      courier: await doc.embedFont(StandardFonts.Courier),
-      courierBold: await doc.embedFont(StandardFonts.CourierBold),
+  const embedFonts =
+    async (
+      doc: PDFDocument
+    ) => {
+      return {
+        helvetica:
+          await doc.embedFont(
+            StandardFonts.Helvetica
+          ),
+
+        helveticaBold:
+          await doc.embedFont(
+            StandardFonts.HelveticaBold
+          ),
+
+        helveticaOblique:
+          await doc.embedFont(
+            StandardFonts.HelveticaOblique
+          ),
+
+        timesRoman:
+          await doc.embedFont(
+            StandardFonts.TimesRoman
+          ),
+
+        timesRomanBold:
+          await doc.embedFont(
+            StandardFonts.TimesRomanBold
+          ),
+
+        timesRomanItalic:
+          await doc.embedFont(
+            StandardFonts.TimesRomanItalic
+          ),
+
+        courier:
+          await doc.embedFont(
+            StandardFonts.Courier
+          ),
+
+        courierBold:
+          await doc.embedFont(
+            StandardFonts.CourierBold
+          ),
+      };
     };
-  };
 
-  if (template.type === 'upload' && template.backgroundImage?.startsWith('data:application/pdf;base64,')) {
-    // Option A: Loaded from an existing PDF Template
-    const pdfBase64 = template.backgroundImage.split(',')[1];
-    const pdfBytes = Buffer.from(pdfBase64, 'base64');
-    
-    const templateDoc = await PDFDocument.load(pdfBytes);
-    pdfDoc = await PDFDocument.create();
-    const [copiedPage] = await pdfDoc.copyPages(templateDoc, [0]);
-    pdfDoc.addPage(copiedPage);
+  /* ------------------------------------------------
+     BACKGROUND
+  ------------------------------------------------ */
+
+  if (
+    template.type ===
+      'upload' &&
+    template.backgroundImage?.startsWith(
+      'data:application/pdf;base64,'
+    )
+  ) {
+    const pdfBase64 =
+      template.backgroundImage
+        .split(',')[1];
+
+    const pdfBytes =
+      Buffer.from(
+        pdfBase64,
+        'base64'
+      );
+
+    const templateDoc =
+      await PDFDocument.load(
+        pdfBytes
+      );
+
+    pdfDoc =
+      await PDFDocument.create();
+
+    const [
+      copiedPage,
+    ] =
+      await pdfDoc.copyPages(
+        templateDoc,
+        [0]
+      );
+
+    pdfDoc.addPage(
+      copiedPage
+    );
   } else {
-    // Option B: Visual editor from scratch or Option A from image background
-    pdfDoc = await PDFDocument.create();
-    const width = template.width || 842; // A4 Landscape points default
-    const height = template.height || 595;
-    const page = pdfDoc.addPage([width, height]);
+    pdfDoc =
+      await PDFDocument.create();
 
-    // Draw background image if present (non-PDF)
-    if (template.backgroundImage && !template.backgroundImage.startsWith('data:application/pdf;base64,')) {
+    const width =
+      template.width || 842;
+
+    const height =
+      template.height || 595;
+
+    const page =
+      pdfDoc.addPage([
+        width,
+        height,
+      ]);
+
+    if (
+      template.backgroundImage &&
+      !template.backgroundImage.startsWith(
+        'data:application/pdf;base64,'
+      )
+    ) {
       try {
-        const parts = template.backgroundImage.split(',');
-        const mime = parts[0].match(/:(.*?);/)?.[1] || '';
-        const base64Data = parts[1];
-        const imgBytes = Buffer.from(base64Data, 'base64');
+        const parts =
+          template.backgroundImage.split(
+            ','
+          );
 
-        let bgImage;
-        if (mime.includes('png')) {
-          bgImage = await pdfDoc.embedPng(imgBytes);
+        const mime =
+          parts[0]
+            .match(
+              /:(.*?);/
+            )?.[1] || '';
+
+        const imgBytes =
+          Buffer.from(
+            parts[1],
+            'base64'
+          );
+
+        let image;
+
+        if (
+          mime.includes(
+            'png'
+          )
+        ) {
+          image =
+            await pdfDoc.embedPng(
+              imgBytes
+            );
         } else {
-          bgImage = await pdfDoc.embedJpg(imgBytes);
+          image =
+            await pdfDoc.embedJpg(
+              imgBytes
+            );
         }
 
-        page.drawImage(bgImage, {
-          x: 0,
-          y: 0,
-          width,
-          height,
-        });
-      } catch (err) {
-        console.error('Failed to draw background image:', err);
+        page.drawImage(
+          image,
+          {
+            x: 0,
+            y: 0,
+            width,
+            height,
+          }
+        );
+      } catch (error) {
+        console.error(
+          'Background image error:',
+          error
+        );
       }
     }
   }
 
-  const page = pdfDoc.getPages()[0];
-  const pdfWidth = page.getWidth();
-  const pdfHeight = page.getHeight();
+  const page =
+    pdfDoc.getPages()[0];
 
-  const fonts = await embedFonts(pdfDoc);
+  const pdfWidth =
+    page.getWidth();
 
-  // Helper to map font keys
-  const getFont = (family?: string, weight?: string, style?: string) => {
-    const isBold = weight === 'bold' || weight === '700';
-    const isItalic = style === 'italic' || family?.toLowerCase().includes('vibes') || family?.toLowerCase().includes('script');
-    
-    if (family?.toLowerCase().includes('times') || family?.toLowerCase().includes('serif')) {
-      if (isBold && isItalic) return fonts.timesRomanBold; // fallback
-      if (isBold) return fonts.timesRomanBold;
-      if (isItalic) return fonts.timesRomanItalic;
+  const pdfHeight =
+    page.getHeight();
+
+  const fonts =
+    await embedFonts(
+      pdfDoc
+    );
+
+  const getFont = (
+    family?: string,
+    weight?: string,
+    style?: string
+  ) => {
+    const isBold =
+      weight === 'bold' ||
+      weight === '700';
+
+    const isItalic =
+      style === 'italic';
+
+    const familyName =
+      family?.toLowerCase() ||
+      '';
+
+    if (
+      familyName.includes(
+        'times'
+      ) ||
+      familyName.includes(
+        'serif'
+      )
+    ) {
+      if (
+        isBold
+      ) {
+        return fonts.timesRomanBold;
+      }
+
+      if (
+        isItalic
+      ) {
+        return fonts.timesRomanItalic;
+      }
+
       return fonts.timesRoman;
     }
-    if (family?.toLowerCase().includes('courier') || family?.toLowerCase().includes('mono')) {
-      if (isBold) return fonts.courierBold;
-      return fonts.courier;
+
+    if (
+      familyName.includes(
+        'courier'
+      ) ||
+      familyName.includes(
+        'mono'
+      )
+    ) {
+      return isBold
+        ? fonts.courierBold
+        : fonts.courier;
     }
-    // Default Helvetica
-    if (isBold) return fonts.helveticaBold;
-    if (isItalic) return fonts.helveticaOblique;
+
+    if (
+      isBold
+    ) {
+      return fonts.helveticaBold;
+    }
+
+    if (
+      isItalic
+    ) {
+      return fonts.helveticaOblique;
+    }
+
     return fonts.helvetica;
   };
 
-  // Draw overlay elements
-  const elements = template.elements || [];
-  
-  // Sorting elements by layer order (zIndex or simple order in editor)
-  const sortedElements = [...elements].sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+  /* ------------------------------------------------
+     CERTIFICATE BODY
+  ------------------------------------------------ */
 
-  for (const element of sortedElements) {
-    // Normalization Scale Factors
-    const designWidth = template.width || 842;
-    const designHeight = template.height || 595;
-    const scaleX = pdfWidth / designWidth;
-    const scaleY = pdfHeight / designHeight;
+  const certificateBody =
+    (template as any)
+      .certificateBody;
 
-    const elX = element.x * scaleX;
-    // Translate y-coordinate from top-left (editor) to bottom-left (pdf-lib)
-    const elY = pdfHeight - (element.y * scaleY);
-    const elWidth = (element.width || 200) * scaleX;
-    const elHeight = (element.height || 40) * scaleY;
+  if (
+    certificateBody &&
+    certificateBody.trim()
+  ) {
+    const bodyText =
+      replacePlaceholders(
+        certificateBody,
+        student,
+        mappings
+      );
 
-    if (element.type === 'text') {
-      const textRaw = element.text || '';
-      const textContent = replacePlaceholders(textRaw, student, mappings);
-      const fontSize = (element.fontSize || 14) * Math.min(scaleX, scaleY);
-      const font = getFont(element.fontFamily, element.fontWeight, element.fontStyle);
-      const color = parseColor(element.color);
+    const bodyElement =
+      (
+        template.elements ||
+        []
+      ).find(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      ) as any;
 
-      // Max width constraint for wrapping
-      const padding = 2;
-      const wrapWidth = elWidth - (padding * 2);
-      const lines = wrapText(textContent, wrapWidth, font, fontSize);
+    if (bodyElement) {
+      const designWidth =
+        template.width ||
+        842;
 
-      const lineHeight = (element.lineHeight || 1.2) * fontSize;
+      const designHeight =
+        template.height ||
+        595;
 
-      lines.forEach((line, index) => {
-        const lineY = elY - (fontSize * 0.8) - (index * lineHeight);
-        const lineWidth = font.widthOfTextAtSize(line, fontSize);
-        
-        let drawX = elX + padding;
-        if (element.align === 'center') {
-          drawX = elX + (elWidth - lineWidth) / 2;
-        } else if (element.align === 'right') {
-          drawX = elX + elWidth - lineWidth - padding;
-        }
+      const scaleX =
+        pdfWidth /
+        designWidth;
 
-        // Draw text if it falls inside the page boundary
-        if (lineY > 0 && lineY < pdfHeight) {
-          page.drawText(line, {
-            x: drawX,
-            y: lineY,
-            size: fontSize,
-            font,
-            color,
-          });
-        }
-      });
-    } else if (element.type === 'image') {
-      try {
-        const parts = element.src.split(',');
-        const mime = parts[0].match(/:(.*?);/)?.[1] || '';
-        const base64Data = parts[1];
-        const imgBytes = Buffer.from(base64Data, 'base64');
+      const scaleY =
+        pdfHeight /
+        designHeight;
 
-        let img;
-        if (mime.includes('png')) {
-          img = await pdfDoc.embedPng(imgBytes);
-        } else {
-          img = await pdfDoc.embedJpg(imgBytes);
-        }
+      const x =
+        bodyElement.x *
+        scaleX;
 
-        // Translate bottom coordinate for image placement
-        const drawY = elY - elHeight;
-        page.drawImage(img, {
-          x: elX,
-          y: drawY,
-          width: elWidth,
-          height: elHeight,
-        });
-      } catch (err) {
-        console.error('Failed to draw overlay image element:', err);
+      const topY =
+        bodyElement.y *
+        scaleY;
+
+      const width =
+        (bodyElement.width ||
+          600) *
+        scaleX;
+
+      const height =
+        (bodyElement.height ||
+          180) *
+        scaleY;
+
+      const font =
+        getFont(
+          bodyElement.fontFamily,
+          bodyElement.fontWeight,
+          bodyElement.fontStyle
+        );
+
+      let fontSize =
+        (bodyElement.fontSize ||
+          16) *
+        Math.min(
+          scaleX,
+          scaleY
+        );
+
+      const minFontSize =
+        bodyElement.minFontSize ||
+        10;
+
+      const lines =
+        wrapText(
+          bodyText,
+          width - 10,
+          font,
+          fontSize
+        );
+
+      const lineHeight =
+        fontSize *
+        (bodyElement.lineHeight ||
+          1.35);
+
+      const maxLines =
+        Math.max(
+          1,
+          Math.floor(
+            height /
+              lineHeight
+          )
+        );
+
+      while (
+        lines.length >
+          maxLines &&
+        fontSize >
+          minFontSize
+      ) {
+        fontSize -= 1;
       }
-    } else if (element.type === 'shape') {
-      const color = parseColor(element.fillColor || '#000000');
-      const drawY = elY - elHeight;
 
-      if (element.shapeType === 'line') {
-        const strokeColor = parseColor(element.strokeColor || '#000000');
-        const thickness = element.thickness || 2;
-        page.drawLine({
-          start: { x: elX, y: elY },
-          end: { x: elX + elWidth, y: elY },
-          thickness: thickness * Math.min(scaleX, scaleY),
-          color: strokeColor,
-        });
+      const finalLines =
+        wrapText(
+          bodyText,
+          width - 10,
+          font,
+          fontSize
+        );
+
+      const drawTop =
+        pdfHeight -
+        topY;
+
+      finalLines
+        .slice(
+          0,
+          Math.max(
+            maxLines,
+            1
+          )
+        )
+        .forEach(
+          (
+            line,
+            index
+          ) => {
+            const lineWidth =
+              font.widthOfTextAtSize(
+                line,
+                fontSize
+              );
+
+            let drawX =
+              x + 5;
+
+            if (
+              bodyElement.align ===
+              'center'
+            ) {
+              drawX =
+                x +
+                (width -
+                  lineWidth) /
+                  2;
+            } else if (
+              bodyElement.align ===
+              'right'
+            ) {
+              drawX =
+                x +
+                width -
+                lineWidth -
+                5;
+            }
+
+            const lineY =
+              drawTop -
+              fontSize -
+              index *
+                lineHeight;
+
+            if (
+              lineY >
+                0 &&
+              lineY <
+                pdfHeight
+            ) {
+              page.drawText(
+                line,
+                {
+                  x:
+                    drawX,
+
+                  y:
+                    lineY,
+
+                  size:
+                    fontSize,
+
+                  font,
+
+                  color:
+                    parseColor(
+                      bodyElement.color ||
+                        '#000000'
+                    ),
+                }
+              );
+            }
+          }
+        );
+    }
+  }
+
+  /* ------------------------------------------------
+     VISUAL ELEMENTS
+  ------------------------------------------------ */
+
+  const elements =
+    [
+      ...(template.elements ||
+        []),
+    ].sort(
+      (a: any, b: any) =>
+        (a.zIndex || 0) -
+        (b.zIndex || 0)
+    );
+
+  for (
+    const element of elements
+  ) {
+    /*
+     * Certificate body is handled above.
+     */
+    if (
+      element.id ===
+      'certificate_body'
+    ) {
+      continue;
+    }
+
+    const designWidth =
+      template.width ||
+      842;
+
+    const designHeight =
+      template.height ||
+      595;
+
+    const scaleX =
+      pdfWidth /
+      designWidth;
+
+    const scaleY =
+      pdfHeight /
+      designHeight;
+
+    const elX =
+      element.x *
+      scaleX;
+
+    const elY =
+      pdfHeight -
+      element.y *
+        scaleY;
+
+    const elWidth =
+      (element.width ||
+        200) *
+      scaleX;
+
+    const elHeight =
+      (element.height ||
+        40) *
+      scaleY;
+
+    if (
+      element.type ===
+      'text'
+    ) {
+      const textRaw =
+        element.text ||
+        '';
+
+      const textContent =
+        replacePlaceholders(
+          textRaw,
+          student,
+          mappings
+        );
+
+      const font =
+        getFont(
+          element.fontFamily,
+          element.fontWeight,
+          element.fontStyle
+        );
+
+      const requestedSize =
+        (element.fontSize ||
+          14) *
+        Math.min(
+          scaleX,
+          scaleY
+        );
+
+      const minSize =
+        (element as any)
+          .minFontSize ||
+        8;
+
+      let fontSize =
+        requestedSize;
+
+      /*
+       * Automatic fitting for
+       * student name and role.
+       */
+      const autoFit =
+        (element as any)
+          .autoFit ===
+        true;
+
+      if (
+        autoFit
+      ) {
+        fontSize =
+          getAutoFitFontSize(
+            textContent,
+            font,
+            requestedSize,
+            minSize,
+            elWidth - 8
+          );
+      }
+
+      const color =
+        parseColor(
+          element.color
+        );
+
+      const lines =
+        wrapText(
+          textContent,
+          elWidth - 8,
+          font,
+          fontSize
+        );
+
+      const lineHeight =
+        (element.lineHeight ||
+          1.2) *
+        fontSize;
+
+      lines.forEach(
+        (
+          line,
+          index
+        ) => {
+          const lineY =
+            elY -
+            fontSize *
+              0.8 -
+            index *
+              lineHeight;
+
+          const lineWidth =
+            font.widthOfTextAtSize(
+              line,
+              fontSize
+            );
+
+          let drawX =
+            elX + 4;
+
+          if (
+            element.align ===
+            'center'
+          ) {
+            drawX =
+              elX +
+              (elWidth -
+                lineWidth) /
+                2;
+          } else if (
+            element.align ===
+            'right'
+          ) {
+            drawX =
+              elX +
+              elWidth -
+              lineWidth -
+              4;
+          }
+
+          if (
+            lineY >
+              0 &&
+            lineY <
+              pdfHeight
+          ) {
+            page.drawText(
+              line,
+              {
+                x:
+                  drawX,
+
+                y:
+                  lineY,
+
+                size:
+                  fontSize,
+
+                font,
+
+                color,
+              }
+            );
+          }
+        }
+      );
+    }
+
+    else if (
+      element.type ===
+      'image'
+    ) {
+      try {
+        const parts =
+          element.src.split(
+            ','
+          );
+
+        const mime =
+          parts[0]
+            .match(
+              /:(.*?);/
+            )?.[1] || '';
+
+        const imgBytes =
+          Buffer.from(
+            parts[1],
+            'base64'
+          );
+
+        let image;
+
+        if (
+          mime.includes(
+            'png'
+          )
+        ) {
+          image =
+            await pdfDoc.embedPng(
+              imgBytes
+            );
+        } else {
+          image =
+            await pdfDoc.embedJpg(
+              imgBytes
+            );
+        }
+
+        page.drawImage(
+          image,
+          {
+            x:
+              elX,
+
+            y:
+              elY -
+              elHeight,
+
+            width:
+              elWidth,
+
+            height:
+              elHeight,
+          }
+        );
+      } catch (error) {
+        console.error(
+          'Image element error:',
+          error
+        );
+      }
+    }
+
+    else if (
+      element.type ===
+      'shape'
+    ) {
+      const color =
+        parseColor(
+          element.fillColor ||
+            '#000000'
+        );
+
+      const drawY =
+        elY -
+        elHeight;
+
+      if (
+        element.shapeType ===
+        'line'
+      ) {
+        page.drawLine(
+          {
+            start: {
+              x: elX,
+              y: elY,
+            },
+
+            end: {
+              x:
+                elX +
+                elWidth,
+
+              y: elY,
+            },
+
+            thickness:
+              (element.thickness ||
+                2) *
+              Math.min(
+                scaleX,
+                scaleY
+              ),
+
+            color:
+              parseColor(
+                element.strokeColor ||
+                  '#000000'
+              ),
+          }
+        );
       } else {
-        // Rectangle default
-        page.drawRectangle({
-          x: elX,
-          y: drawY,
-          width: elWidth,
-          height: elHeight,
-          color,
-        });
+        page.drawRectangle(
+          {
+            x:
+              elX,
+
+            y:
+              drawY,
+
+            width:
+              elWidth,
+
+            height:
+              elHeight,
+
+            color,
+          }
+        );
       }
     }
   }
@@ -272,18 +1060,59 @@ export async function generatePDF(
   return await pdfDoc.save();
 }
 
+/* --------------------------------------------------
+   SAVE PDF
+-------------------------------------------------- */
+
 export async function saveStudentPDF(
   template: Template,
   student: Student,
   mappings: Record<string, string>
 ): Promise<string> {
-  const pdfBytes = await generatePDF(template, student, mappings);
-  const dirPath = path.join(process.cwd(), 'data', 'certificates', student.campaignId);
-  await fs.mkdir(dirPath, { recursive: true });
-  
-  // Safe URL-friendly filename: Ankitha_R_CERT-2026-00001.pdf
-  const safeName = `${student.name.replace(/[^a-zA-Z0-9]/g, '_')}_${student.certId}.pdf`;
-  const filePath = path.join(dirPath, safeName);
-  await fs.writeFile(filePath, pdfBytes);
+  const pdfBytes =
+    await generatePDF(
+      template,
+      student,
+      mappings
+    );
+
+  const dirPath =
+    path.join(
+      process.cwd(),
+      'data',
+      'certificates',
+      student.campaignId
+    );
+
+  await fs.mkdir(
+    dirPath,
+    {
+      recursive:
+        true,
+    }
+  );
+
+  const safeName =
+    `${
+      student.name
+        .replace(
+          /[^a-zA-Z0-9]/g,
+          '_'
+        )
+    }_${
+      student.certId
+    }.pdf`;
+
+  const filePath =
+    path.join(
+      dirPath,
+      safeName
+    );
+
+  await fs.writeFile(
+    filePath,
+    pdfBytes
+  );
+
   return filePath;
 }
