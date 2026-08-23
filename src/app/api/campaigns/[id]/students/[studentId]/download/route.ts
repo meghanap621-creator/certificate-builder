@@ -1,19 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth-middleware';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { saveStudentPDF } from '@/lib/pdf';
-import fs from 'fs/promises';
+import {
+  saveStudentPDF,
+  getStoredStudentPDF,
+} from '@/lib/pdf';
 
 export async function GET(
   request: Request,
-  {
-    params,
-  }: {
-    params: Promise<{
-      id: string;
-      studentId: string;
-    }>;
-  }
+  { params }: { params: Promise<{ id: string; studentId: string }> }
 ) {
   try {
     const user = await getAuthUser();
@@ -30,9 +25,9 @@ export async function GET(
       studentId,
     } = await params;
 
-    // --------------------------------------------------
-    // 1. Load campaign
-    // --------------------------------------------------
+    /* ---------------------------------------------
+       1. LOAD CAMPAIGN
+    --------------------------------------------- */
 
     const {
       data: campaign,
@@ -63,9 +58,9 @@ export async function GET(
       );
     }
 
-    // --------------------------------------------------
-    // 2. Load student
-    // --------------------------------------------------
+    /* ---------------------------------------------
+       2. LOAD STUDENT
+    --------------------------------------------- */
 
     const {
       data: studentRow,
@@ -92,16 +87,113 @@ export async function GET(
 
     if (!studentRow) {
       return NextResponse.json(
-        {
-          error:
-            'Student record not found.',
-        },
+        { error: 'Student record not found.' },
         { status: 404 }
       );
     }
 
-    // Convert Supabase row to the structure
-    // expected by saveStudentPDF()
+    /* ---------------------------------------------
+       3. LOAD TEMPLATE
+    --------------------------------------------- */
+
+    if (!campaign.template_id) {
+      return NextResponse.json(
+        {
+          error:
+            'Certificate template not found.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const {
+      data: template,
+      error: templateError,
+    } = await supabaseAdmin
+      .from('templates')
+      .select('*')
+      .eq('id', campaign.template_id)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (templateError) {
+      console.error(
+        'Template lookup error:',
+        templateError
+      );
+
+      return NextResponse.json(
+        { error: templateError.message },
+        { status: 500 }
+      );
+    }
+
+    if (!template) {
+      return NextResponse.json(
+        {
+          error:
+            'Certificate template not found.',
+        },
+        { status: 400 }
+      );
+    }
+
+    /* ---------------------------------------------
+       4. LOAD COLUMN MAPPINGS
+    --------------------------------------------- */
+
+    const {
+      data: mappingRows,
+      error: mappingError,
+    } = await supabaseAdmin
+      .from('column_mappings')
+      .select(
+        'certificate_field, source_column'
+      )
+      .eq('campaign_id', campaignId)
+      .eq('user_id', user.id);
+
+    if (mappingError) {
+      console.error(
+        'Mapping lookup error:',
+        mappingError
+      );
+
+      return NextResponse.json(
+        { error: mappingError.message },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !mappingRows ||
+      mappingRows.length === 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            'Column mappings not found.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const mappings: Record<string, string> = {};
+
+    for (const row of mappingRows) {
+      if (
+        row.certificate_field &&
+        row.source_column
+      ) {
+        mappings[
+          row.certificate_field
+        ] = row.source_column;
+      }
+    }
+
+    /* ---------------------------------------------
+       5. CONVERT STUDENT
+    --------------------------------------------- */
 
     const student: any = {
       id: studentRow.id,
@@ -149,126 +241,89 @@ export async function GET(
         studentRow.custom_data || {},
     };
 
-    // --------------------------------------------------
-    // 3. Load template
-    // --------------------------------------------------
-
-    if (!campaign.template_id) {
-      return NextResponse.json(
-        {
-          error:
-            'Template not found. Please attach a certificate design first.',
-        },
-        { status: 400 }
-      );
-    }
+    /* ---------------------------------------------
+       6. FIND EXISTING PDF
+    --------------------------------------------- */
 
     const {
-      data: template,
-      error: templateError,
+      data: existingLogs,
+      error: logError,
     } = await supabaseAdmin
-      .from('templates')
+      .from('email_logs')
       .select('*')
-      .eq('id', campaign.template_id)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (templateError) {
-      console.error(
-        'Template lookup error:',
-        templateError
-      );
-
-      return NextResponse.json(
-        { error: templateError.message },
-        { status: 500 }
-      );
-    }
-
-    if (!template) {
-      return NextResponse.json(
-        { error: 'Template not found.' },
-        { status: 400 }
-      );
-    }
-
-    // --------------------------------------------------
-    // 4. Load column mappings
-    // --------------------------------------------------
-
-    const {
-      data: mappingRows,
-      error: mappingError,
-    } = await supabaseAdmin
-      .from('column_mappings')
-      .select(
-        'certificate_field, source_column'
-      )
       .eq('campaign_id', campaignId)
-      .eq('user_id', user.id);
+      .eq('student_id', studentId)
+      .eq('user_id', user.id)
+      .order('created_at', {
+        ascending: false,
+      })
+      .limit(1);
 
-    if (mappingError) {
-      console.error(
-        'Mapping lookup error:',
-        mappingError
-      );
-
-      return NextResponse.json(
-        { error: mappingError.message },
-        { status: 500 }
-      );
-    }
-
-    if (
-      !mappingRows ||
-      mappingRows.length === 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            'Column mappings not found.',
-        },
-        { status: 400 }
+    if (logError) {
+      console.warn(
+        'Email log lookup warning:',
+        logError
       );
     }
 
-    const mappings: Record<
-      string,
-      string
-    > = {};
+    const log =
+      existingLogs &&
+      existingLogs.length > 0
+        ? existingLogs[0]
+        : null;
 
-    for (const row of mappingRows) {
-      if (
-        row.certificate_field &&
-        row.source_column
-      ) {
-        mappings[
-          row.certificate_field
-        ] = row.source_column;
+    let pdfPath =
+      log?.pdf_path || null;
+
+    let fileBytes: Buffer | null =
+      null;
+
+    /* ---------------------------------------------
+       7. TRY SUPABASE STORAGE
+    --------------------------------------------- */
+
+    if (pdfPath) {
+      try {
+        fileBytes =
+          await getStoredStudentPDF(
+            pdfPath
+          );
+      } catch (error) {
+        console.warn(
+          'Existing certificate unavailable. Regenerating...',
+          error
+        );
+
+        fileBytes = null;
       }
     }
 
-    // --------------------------------------------------
-    // 5. Generate certificate PDF
-    // --------------------------------------------------
+    /* ---------------------------------------------
+       8. GENERATE IF MISSING
+    --------------------------------------------- */
 
-    const pdfPath =
-      await saveStudentPDF(
-        template,
-        student,
-        mappings
-      );
+    if (!fileBytes) {
+      pdfPath =
+        await saveStudentPDF(
+          template,
+          student,
+          mappings
+        );
 
-    const fileBytes =
-      await fs.readFile(pdfPath);
+      fileBytes =
+        await getStoredStudentPDF(
+          pdfPath
+        );
+    }
 
-    // --------------------------------------------------
-    // 6. Create safe filename
-    // --------------------------------------------------
+    /* ---------------------------------------------
+       9. SAFE FILE NAME
+    --------------------------------------------- */
 
-    const safeStudentName =
+    const safeName =
       String(
-        student.name || 'Student'
+        student.name ||
+          'Student'
       ).replace(
         /[^a-zA-Z0-9]/g,
         '_'
@@ -283,15 +338,17 @@ export async function GET(
         '_'
       );
 
-    const filename =
-      `${safeStudentName}_${safeCertId}.pdf`;
+    const fileName =
+      `${safeName}_${safeCertId}.pdf`;
 
-    // --------------------------------------------------
-    // 7. Return PDF
-    // --------------------------------------------------
+    /* ---------------------------------------------
+       10. RETURN PDF
+    --------------------------------------------- */
 
     return new NextResponse(
-      new Uint8Array(fileBytes),
+      new Uint8Array(
+        fileBytes
+      ),
       {
         status: 200,
 
@@ -300,10 +357,12 @@ export async function GET(
             'application/pdf',
 
           'Content-Disposition':
-            `attachment; filename="${filename}"`,
+            `attachment; filename="${fileName}"`,
 
-          'Cache-Control':
-            'no-store',
+          'Content-Length':
+            String(
+              fileBytes.length
+            ),
         },
       }
     );

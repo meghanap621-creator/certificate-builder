@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth-middleware';
 import { supabaseAdmin } from '@/lib/supabase-admin';
-import { saveStudentPDF } from '@/lib/pdf';
-import fs from 'fs/promises';
+import {
+  saveStudentPDF,
+  getStoredStudentPDF,
+} from '@/lib/pdf';
 import JSZip from 'jszip';
 
 export async function GET(
@@ -21,11 +23,9 @@ export async function GET(
 
     const { id: campaignId } = await params;
 
-    /*
-     * --------------------------------------------------
-     * 1. Load campaign
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       1. LOAD CAMPAIGN
+    --------------------------------------------- */
 
     const {
       data: campaign,
@@ -56,11 +56,9 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------------------------
-     * 2. Load template
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       2. LOAD TEMPLATE
+    --------------------------------------------- */
 
     if (!campaign.template_id) {
       return NextResponse.json(
@@ -104,11 +102,9 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------------------------
-     * 3. Load column mappings
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       3. LOAD COLUMN MAPPINGS
+    --------------------------------------------- */
 
     const {
       data: mappingRows,
@@ -146,23 +142,25 @@ export async function GET(
       );
     }
 
-    const mappings: Record<string, string> = {};
+    const mappings: Record<
+      string,
+      string
+    > = {};
 
     for (const row of mappingRows) {
       if (
         row.certificate_field &&
         row.source_column
       ) {
-        mappings[row.certificate_field] =
-          row.source_column;
+        mappings[
+          row.certificate_field
+        ] = row.source_column;
       }
     }
 
-    /*
-     * --------------------------------------------------
-     * 4. Load students
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       4. LOAD STUDENTS
+    --------------------------------------------- */
 
     const {
       data: studentRows,
@@ -201,11 +199,9 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------------------------
-     * 5. Load email logs
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       5. LOAD EMAIL LOGS
+    --------------------------------------------- */
 
     const {
       data: logs,
@@ -228,221 +224,223 @@ export async function GET(
       );
     }
 
-    /*
-     * --------------------------------------------------
-     * 6. Create ZIP
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       6. CREATE ZIP
+    --------------------------------------------- */
 
     const zip = new JSZip();
 
-    /*
-     * Track log updates so we don't repeatedly
-     * write the same record.
-     */
-
-    const logUpdates: Array<{
-      id: string;
-      pdfPath: string;
-    }> = [];
-
-    /*
-     * --------------------------------------------------
-     * 7. Generate/read certificates
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       7. PROCESS EACH STUDENT
+    --------------------------------------------- */
 
     for (const studentRow of studentRows) {
-      /*
-       * Convert Supabase row into the format expected
-       * by the PDF generator.
-       */
+      try {
+        /*
+         * Convert Supabase student row
+         * to PDF generator format.
+         */
 
-      const student: any = {
-        id: studentRow.id,
+        const student: any = {
+          id: studentRow.id,
 
-        campaignId:
-          studentRow.campaign_id,
+          campaignId:
+            studentRow.campaign_id,
 
-        userId:
-          studentRow.user_id,
+          userId:
+            studentRow.user_id,
 
-        name:
-          studentRow.student_name || '',
+          name:
+            studentRow.student_name || '',
 
-        email:
-          studentRow.email || '',
+          email:
+            studentRow.email || '',
 
-        collegeName:
-          studentRow.college_name || '',
+          collegeName:
+            studentRow.college_name || '',
 
-        course:
-          studentRow.course || '',
+          course:
+            studentRow.course || '',
 
-        department:
-          studentRow.department || '',
+          department:
+            studentRow.department || '',
 
-        role:
-          studentRow.internship_role || '',
+          role:
+            studentRow.internship_role || '',
 
-        organizationName:
-          studentRow.organization_name || '',
+          organizationName:
+            studentRow.organization_name || '',
 
-        startDate:
-          studentRow.start_date || '',
+          startDate:
+            studentRow.start_date || '',
 
-        endDate:
-          studentRow.end_date || '',
+          endDate:
+            studentRow.end_date || '',
 
-        certDate:
-          studentRow.certificate_date || '',
+          certDate:
+            studentRow.certificate_date || '',
 
-        certId:
-          studentRow.external_student_id || '',
+          certId:
+            studentRow.external_student_id ||
+            '',
 
-        customFields:
-          studentRow.custom_data || {},
-      };
+          customFields:
+            studentRow.custom_data || {},
+        };
 
-      const log = logs?.find(
-        (item) =>
-          item.student_id === studentRow.id
-      );
+        /*
+         * Find existing email log.
+         */
 
-      let pdfPath =
-        log?.pdf_path || null;
-
-      let fileBytes: Buffer;
-
-      /*
-       * ------------------------------------------------
-       * Try existing generated PDF first
-       * ------------------------------------------------
-       */
-
-      let needToGenerate = true;
-
-      if (pdfPath) {
-        try {
-          fileBytes =
-            await fs.readFile(pdfPath);
-
-          needToGenerate = false;
-        } catch {
-          /*
-           * File no longer exists.
-           * Generate a new one below.
-           */
-          needToGenerate = true;
-        }
-      }
-
-      /*
-       * ------------------------------------------------
-       * Generate PDF if necessary
-       * ------------------------------------------------
-       */
-
-      if (needToGenerate) {
-        const generatedPath =
-          await saveStudentPDF(
-            template,
-            student,
-            mappings
+        const log =
+          logs?.find(
+            (item) =>
+              item.student_id ===
+              studentRow.id
           );
 
-        pdfPath = generatedPath;
+        /*
+         * The log may contain a PDF path
+         * if your email workflow stores it.
+         */
 
-        fileBytes =
-          await fs.readFile(generatedPath);
+        let pdfPath =
+          log?.pdf_path || null;
 
-        if (log) {
-          logUpdates.push({
-            id: log.id,
-            pdfPath: generatedPath,
-          });
+        let fileBytes: Buffer | null =
+          null;
+
+        /* -----------------------------------------
+           TRY EXISTING SUPABASE PDF
+        ----------------------------------------- */
+
+        if (pdfPath) {
+          try {
+            fileBytes =
+              await getStoredStudentPDF(
+                pdfPath
+              );
+          } catch (error) {
+            console.warn(
+              `Existing certificate unavailable for ${student.name}. Regenerating...`,
+              error
+            );
+
+            fileBytes = null;
+          }
         }
-      }
 
-      /*
-       * ------------------------------------------------
-       * Add PDF to ZIP
-       * ------------------------------------------------
-       */
+        /* -----------------------------------------
+           GENERATE IF NO PDF EXISTS
+        ----------------------------------------- */
 
-      const safeStudentName =
-        String(student.name || 'Student')
-          .replace(
+        if (!fileBytes) {
+          pdfPath =
+            await saveStudentPDF(
+              template,
+              student,
+              mappings
+            );
+
+          /*
+           * IMPORTANT:
+           *
+           * saveStudentPDF() returns a
+           * Supabase Storage path.
+           *
+           * It does NOT return a local
+           * filesystem path.
+           */
+
+          fileBytes =
+            await getStoredStudentPDF(
+              pdfPath
+            );
+        }
+
+        /* -----------------------------------------
+           SAFE FILE NAME
+        ----------------------------------------- */
+
+        const safeStudentName =
+          String(
+            student.name ||
+              'Student'
+          ).replace(
             /[^a-zA-Z0-9]/g,
             '_'
           );
 
-      const safeCertId =
-        String(
-          student.certId ||
-            student.id
-        ).replace(
-          /[^a-zA-Z0-9_-]/g,
-          '_'
+        const safeCertId =
+          String(
+            student.certId ||
+              student.id
+          ).replace(
+            /[^a-zA-Z0-9_-]/g,
+            '_'
+          );
+
+        const fileName =
+          `${safeStudentName}_${safeCertId}.pdf`;
+
+        /* -----------------------------------------
+           ADD TO ZIP
+        ----------------------------------------- */
+
+        zip.file(
+          fileName,
+          fileBytes
         );
+      } catch (studentError: any) {
+        /*
+         * Do not fail the entire ZIP because
+         * of one student.
+         */
 
-      const fileName =
-        `${safeStudentName}_${safeCertId}.pdf`;
-
-      zip.file(
-        fileName,
-        fileBytes!
-      );
+        console.error(
+          `Failed to generate certificate for ${studentRow.student_name}:`,
+          studentError
+        );
+      }
     }
 
-    /*
-     * --------------------------------------------------
-     * 8. Update generated PDF paths
-     * --------------------------------------------------
-     */
-
-    for (const update of logUpdates) {
-      await supabaseAdmin
-        .from('email_logs')
-        .update({
-          /*
-           * Your database does not currently show
-           * pdf_path in email_logs, so we don't try
-           * to write it here.
-           *
-           * PDF files are still included in the ZIP.
-           */
-        })
-        .eq('id', update.id);
-    }
-
-    /*
-     * --------------------------------------------------
-     * 9. Generate ZIP buffer
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       8. GENERATE ZIP
+    --------------------------------------------- */
 
     const zipBuffer =
       await zip.generateAsync({
         type: 'nodebuffer',
+
+        compression:
+          'DEFLATE',
+
+        compressionOptions: {
+          level: 6,
+        },
       });
 
-    /*
-     * --------------------------------------------------
-     * 10. Send ZIP response
-     * --------------------------------------------------
-     */
+    /* ---------------------------------------------
+       9. SAFE CAMPAIGN FILE NAME
+    --------------------------------------------- */
 
     const safeCampaignName =
       String(
-        campaign.name || 'Campaign'
+        campaign.name ||
+          'Campaign'
       ).replace(
         /[^a-zA-Z0-9]/g,
         '_'
       );
 
+    /* ---------------------------------------------
+       10. RETURN ZIP
+    --------------------------------------------- */
+
     return new NextResponse(
-      new Uint8Array(zipBuffer),
+      new Uint8Array(
+        zipBuffer
+      ),
       {
         status: 200,
 
@@ -454,7 +452,9 @@ export async function GET(
             `attachment; filename="Certificates_${safeCampaignName}.zip"`,
 
           'Content-Length':
-            String(zipBuffer.length),
+            String(
+              zipBuffer.length
+            ),
         },
       }
     );
