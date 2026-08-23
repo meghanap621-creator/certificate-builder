@@ -29,14 +29,33 @@ function mapTemplate(template: any) {
     userId: template.user_id,
     name: template.name,
     type: template.template_type,
+
     backgroundImage,
-    width: Number(template.page_width || 842),
-    height: Number(template.page_height || 595),
+
+    width: Number(
+      template.page_width || 842
+    ),
+
+    height: Number(
+      template.page_height || 595
+    ),
+
     elements,
+
+    // Certificate body saved in Supabase
+    certificateBody:
+      typeof template.certificate_body === 'string'
+        ? template.certificate_body
+        : '',
+
     createdAt: template.created_at,
     updatedAt: template.updated_at,
   };
 }
+
+/* =========================================================
+   GET - FETCH ALL TEMPLATES
+========================================================= */
 
 export async function GET() {
   try {
@@ -44,16 +63,23 @@ export async function GET() {
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized.' },
-        { status: 401 }
+        {
+          error: 'Unauthorized.',
+        },
+        {
+          status: 401,
+        }
       );
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('templates')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const { data, error } =
+      await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        });
 
     if (error) {
       console.error(
@@ -62,32 +88,56 @@ export async function GET() {
       );
 
       return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
+        {
+          error: error.message,
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     return NextResponse.json({
-      templates: (data || []).map(mapTemplate),
+      templates: (data || []).map(
+        mapTemplate
+      ),
     });
   } catch (err) {
-    console.error('Fetch templates error:', err);
+    console.error(
+      'Fetch templates error:',
+      err
+    );
 
     return NextResponse.json(
-      { error: 'Internal server error.' },
-      { status: 500 }
+      {
+        error:
+          'Internal server error.',
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
-export async function POST(request: Request) {
+/* =========================================================
+   POST - CREATE TEMPLATE
+========================================================= */
+
+export async function POST(
+  request: Request
+) {
   try {
     const user = await getAuthUser();
 
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized.' },
-        { status: 401 }
+        {
+          error: 'Unauthorized.',
+        },
+        {
+          status: 401,
+        }
       );
     }
 
@@ -100,7 +150,12 @@ export async function POST(request: Request) {
       width,
       height,
       elements,
+      certificateBody,
     } = body;
+
+    /* -----------------------------------------------------
+       VALIDATION
+    ----------------------------------------------------- */
 
     if (
       !name ||
@@ -108,8 +163,13 @@ export async function POST(request: Request) {
       !name.trim()
     ) {
       return NextResponse.json(
-        { error: 'Template name is required.' },
-        { status: 400 }
+        {
+          error:
+            'Template name is required.',
+        },
+        {
+          status: 400,
+        }
       );
     }
 
@@ -118,44 +178,84 @@ export async function POST(request: Request) {
       typeof type !== 'string'
     ) {
       return NextResponse.json(
-        { error: 'Template type is required.' },
-        { status: 400 }
+        {
+          error:
+            'Template type is required.',
+        },
+        {
+          status: 400,
+        }
       );
     }
 
+    /* -----------------------------------------------------
+       PAGE SIZE
+    ----------------------------------------------------- */
+
     const pageWidth =
-      typeof width === 'number' && width > 0
+      typeof width === 'number' &&
+      width > 0
         ? width
         : 842;
 
     const pageHeight =
-      typeof height === 'number' && height > 0
+      typeof height === 'number' &&
+      height > 0
         ? height
         : 595;
+
+    /* -----------------------------------------------------
+       EDITOR DATA
+    ----------------------------------------------------- */
 
     const editorData = {
       elements: Array.isArray(elements)
         ? elements
         : [],
+
       backgroundImage:
-        typeof backgroundImage === 'string'
+        typeof backgroundImage ===
+        'string'
           ? backgroundImage
           : '',
     };
 
-    const { data, error } = await supabaseAdmin
-      .from('templates')
-      .insert({
-        user_id: user.id,
-        name: name.trim(),
-        template_type: type,
-        editor_data: editorData,
-        page_width: pageWidth,
-        page_height: pageHeight,
-        dynamic_fields: [],
-      })
-      .select('*')
-      .single();
+    /* -----------------------------------------------------
+       CERTIFICATE BODY
+    ----------------------------------------------------- */
+
+    const finalCertificateBody =
+      typeof certificateBody === 'string'
+        ? certificateBody.trim()
+        : '';
+
+    /* -----------------------------------------------------
+       INSERT
+    ----------------------------------------------------- */
+
+    const { data, error } =
+      await supabaseAdmin
+        .from('templates')
+        .insert({
+          user_id: user.id,
+
+          name: name.trim(),
+
+          template_type: type,
+
+          editor_data: editorData,
+
+          page_width: pageWidth,
+
+          page_height: pageHeight,
+
+          dynamic_fields: [],
+
+          certificate_body:
+            finalCertificateBody,
+        })
+        .select('*')
+        .single();
 
     if (error) {
       console.error(
@@ -164,21 +264,36 @@ export async function POST(request: Request) {
       );
 
       return NextResponse.json(
-        { error: error.message },
-        { status: 500 }
+        {
+          error: error.message,
+        },
+        {
+          status: 500,
+        }
       );
     }
 
     return NextResponse.json({
-      message: 'Template created successfully!',
-      template: mapTemplate(data),
+      message:
+        'Template created successfully!',
+
+      template:
+        mapTemplate(data),
     });
   } catch (err) {
-    console.error('Create template error:', err);
+    console.error(
+      'Create template error:',
+      err
+    );
 
     return NextResponse.json(
-      { error: 'Internal server error.' },
-      { status: 500 }
+      {
+        error:
+          'Internal server error.',
+      },
+      {
+        status: 500,
+      }
     );
   }
 }

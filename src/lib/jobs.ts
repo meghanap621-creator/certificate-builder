@@ -1,7 +1,6 @@
-import { JsonDb, Campaign, Student, Template, DeliveryLog } from './db';
+import { supabaseAdmin } from './supabase-admin';
 import { saveStudentPDF, replacePlaceholders } from './pdf';
 import { sendEmail } from './smtp';
-import path from 'path';
 
 export interface CampaignJob {
   campaignId: string;
@@ -15,67 +14,287 @@ export interface CampaignJob {
   error?: string;
 }
 
-// In-Memory Global Job Registry
 const activeJobs: Record<string, CampaignJob> = {};
 
-// Helper to pause execution (SMTP throttling)
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-export function getJobStatus(campaignId: string): CampaignJob | null {
+export function getJobStatus(
+  campaignId: string
+): CampaignJob | null {
   return activeJobs[campaignId] || null;
 }
 
-export function cancelJob(campaignId: string) {
-  if (activeJobs[campaignId] && activeJobs[campaignId].status === 'Processing') {
-    activeJobs[campaignId].status = 'Failed';
-    activeJobs[campaignId].error = 'Campaign processing cancelled by user.';
+export function cancelJob(
+  campaignId: string
+) {
+  const job = activeJobs[campaignId];
+
+  if (
+    job &&
+    job.status === 'Processing'
+  ) {
+    job.status = 'Failed';
+    job.error =
+      'Campaign processing cancelled by user.';
   }
 }
 
-export async function startCampaignProcessing(userId: string, campaignId: string, onlyPendingFailed = false) {
-  // If already processing, do not start again
-  if (activeJobs[campaignId] && activeJobs[campaignId].status === 'Processing') {
+export async function startCampaignProcessing(
+  userId: string,
+  campaignId: string,
+  onlyPendingFailed = false
+) {
+  /*
+   * Prevent duplicate jobs.
+   */
+  if (
+    activeJobs[campaignId] &&
+    activeJobs[campaignId].status === 'Processing'
+  ) {
     return;
   }
 
-  // Fetch campaign, template, mappings, and students
-  const campaign = await JsonDb.findOne<Campaign>('campaigns', { id: campaignId, userId });
-  if (!campaign) throw new Error('Campaign not found.');
+  /*
+   * --------------------------------------------------
+   * 1. Load campaign
+   * --------------------------------------------------
+   */
 
-  const template = await JsonDb.findOne<Template>('templates', { id: campaign.templateId, userId });
-  if (!template) throw new Error('Template not found. Please bind a certificate design first.');
+  const {
+    data: campaign,
+    error: campaignError,
+  } = await supabaseAdmin
+    .from('campaigns')
+    .select('*')
+    .eq('id', campaignId)
+    .eq('user_id', userId)
+    .maybeSingle();
 
-  const allMappings = await JsonDb.read<any>('mappings');
-  const mappingRecord = allMappings.find((m: any) => m.campaignId === campaignId);
-  if (!mappingRecord || !mappingRecord.mappings) {
-    throw new Error('Column mappings are missing. Please map your spreadsheet columns first.');
+  if (campaignError) {
+    console.error(
+      'Campaign lookup error:',
+      campaignError
+    );
+
+    throw new Error(
+      campaignError.message
+    );
   }
-  const mappings = mappingRecord.mappings;
 
-  const students = await JsonDb.find<Student>('students', { campaignId });
-  if (students.length === 0) {
-    throw new Error('No students found in this campaign. Please upload an Excel/CSV file first.');
+  if (!campaign) {
+    throw new Error(
+      'Campaign not found.'
+    );
   }
 
-  // Filter students based on delivery status if "onlyPendingFailed" is selected
-  let targetStudents = students;
-  const logs = await JsonDb.find<DeliveryLog>('delivery_logs', { campaignId });
+  /*
+   * --------------------------------------------------
+   * 2. Load template
+   * --------------------------------------------------
+   */
+
+  if (!campaign.template_id) {
+    throw new Error(
+      'Template not found. Please bind a certificate design first.'
+    );
+  }
+
+  const {
+    data: template,
+    error: templateError,
+  } = await supabaseAdmin
+    .from('templates')
+    .select('*')
+    .eq('id', campaign.template_id)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (templateError) {
+    console.error(
+      'Template lookup error:',
+      templateError
+    );
+
+    throw new Error(
+      templateError.message
+    );
+  }
+
+  if (!template) {
+    throw new Error(
+      'Template not found. Please bind a certificate design first.'
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * 3. Load column mappings
+   * --------------------------------------------------
+   */
+
+  const {
+    data: mappingRows,
+    error: mappingError,
+  } = await supabaseAdmin
+    .from('column_mappings')
+    .select(
+      'certificate_field, source_column'
+    )
+    .eq('campaign_id', campaignId)
+    .eq('user_id', userId);
+
+  if (mappingError) {
+    console.error(
+      'Mapping lookup error:',
+      mappingError
+    );
+
+    throw new Error(
+      mappingError.message
+    );
+  }
+
+  if (
+    !mappingRows ||
+    mappingRows.length === 0
+  ) {
+    throw new Error(
+      'Column mappings are missing. Please map your spreadsheet columns first.'
+    );
+  }
+
+  const mappings: Record<string, string> = {};
+
+  for (const row of mappingRows) {
+    if (
+      row.certificate_field &&
+      row.source_column
+    ) {
+      mappings[row.certificate_field] =
+        row.source_column;
+    }
+  }
+
+  /*
+   * --------------------------------------------------
+   * 4. Load students
+   * --------------------------------------------------
+   */
+
+  const {
+    data: studentRows,
+    error: studentsError,
+  } = await supabaseAdmin
+    .from('students')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .eq('user_id', userId)
+    .order('row_number', {
+      ascending: true,
+    });
+
+  if (studentsError) {
+    console.error(
+      'Students lookup error:',
+      studentsError
+    );
+
+    throw new Error(
+      studentsError.message
+    );
+  }
+
+  if (
+    !studentRows ||
+    studentRows.length === 0
+  ) {
+    throw new Error(
+      'No students found in this campaign. Please upload an Excel/CSV file first.'
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * 5. Load email logs
+   * --------------------------------------------------
+   */
+
+  const {
+    data: emailLogs,
+    error: logsError,
+  } = await supabaseAdmin
+    .from('email_logs')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .eq('user_id', userId);
+
+  if (logsError) {
+    console.error(
+      'Email logs lookup error:',
+      logsError
+    );
+
+    throw new Error(
+      logsError.message
+    );
+  }
+
+  /*
+   * --------------------------------------------------
+   * 6. Determine target students
+   * --------------------------------------------------
+   */
+
+  let targetStudents = studentRows;
 
   if (onlyPendingFailed) {
-    targetStudents = students.filter((s) => {
-      const log = logs.find((l) => l.studentId === s.id);
-      return !log || log.emailStatus === 'Failed' || log.emailStatus === 'Pending';
-    });
+    targetStudents =
+      studentRows.filter((student) => {
+        const log =
+          emailLogs?.find(
+            (item) =>
+              item.student_id === student.id
+          );
+
+        return (
+          !log ||
+          log.status === 'Failed' ||
+          log.status === 'Pending'
+        );
+      });
   }
 
-  if (targetStudents.length === 0) {
-    throw new Error('No pending or failed student records to process.');
+  if (
+    targetStudents.length === 0
+  ) {
+    throw new Error(
+      'No pending or failed student records to process.'
+    );
   }
 
-  // Update campaign status to Processing in database
-  await JsonDb.update<Campaign>('campaigns', campaignId, { status: 'Processing' });
+  /*
+   * --------------------------------------------------
+   * 7. Mark campaign Processing
+   * --------------------------------------------------
+   */
 
-  // Initialize In-Memory Job state
+  await supabaseAdmin
+    .from('campaigns')
+    .update({
+      status: 'Processing',
+      updated_at:
+        new Date().toISOString(),
+    })
+    .eq('id', campaignId)
+    .eq('user_id', userId);
+
+  /*
+   * --------------------------------------------------
+   * 8. Initialize job
+   * --------------------------------------------------
+   */
+
   activeJobs[campaignId] = {
     campaignId,
     userId,
@@ -87,93 +306,398 @@ export async function startCampaignProcessing(userId: string, campaignId: string
     pending: targetStudents.length,
   };
 
-  // Run processing in background (do not await it in the route response)
-  (async () => {
-    const job = activeJobs[campaignId];
-    
-    // Read all logs once and map for performance
-    const currentLogs = await JsonDb.read<DeliveryLog>('delivery_logs');
+  /*
+   * --------------------------------------------------
+   * 9. Background worker
+   * --------------------------------------------------
+   */
 
-    for (const student of targetStudents) {
-      // Check if job status changed to cancel
-      if (job.status !== 'Processing') {
+  (async () => {
+    const job =
+      activeJobs[campaignId];
+
+    if (!job) {
+      return;
+    }
+
+    for (const studentRow of targetStudents) {
+      if (
+        job.status !== 'Processing'
+      ) {
         break;
       }
 
-      const logIndex = currentLogs.findIndex((l) => l.studentId === student.id && l.campaignId === campaignId);
-      
-      if (logIndex === -1) {
-        // Safe check: If no log exists, skip or initialize
-        job.failed++;
+      /*
+       * Convert Supabase student format
+       * to the format expected by PDF/email code.
+       */
+
+      const student: any = {
+        id: studentRow.id,
+
+        campaignId:
+          studentRow.campaign_id,
+
+        userId:
+          studentRow.user_id,
+
+        name:
+          studentRow.student_name || '',
+
+        email:
+          studentRow.email || '',
+
+        collegeName:
+          studentRow.college_name || '',
+
+        course:
+          studentRow.course || '',
+
+        department:
+          studentRow.department || '',
+
+        role:
+          studentRow.internship_role || '',
+
+        organizationName:
+          studentRow.organization_name || '',
+
+        startDate:
+          studentRow.start_date || '',
+
+        endDate:
+          studentRow.end_date || '',
+
+        certDate:
+          studentRow.certificate_date || '',
+
+        certId:
+          studentRow.external_student_id || '',
+
+        customFields:
+          studentRow.custom_data || {},
+      };
+
+      /*
+       * Find existing email log.
+       */
+
+      const existingLog =
+        emailLogs?.find(
+          (item) =>
+            item.student_id ===
+            studentRow.id
+        );
+
+      /*
+       * Retry mode:
+       * skip already-sent records.
+       */
+
+      if (
+        onlyPendingFailed &&
+        existingLog?.status === 'Sent'
+      ) {
+        job.completed++;
+        job.sent++;
         job.pending--;
+
         continue;
       }
 
-      const currentLog = currentLogs[logIndex];
+      /*
+       * If there is no email address,
+       * mark the record failed.
+       */
 
-      // Skip already Sent if in custom retry mode
-      if (onlyPendingFailed && currentLog.emailStatus === 'Sent') {
-        job.completed++;
+      if (!student.email) {
+        job.failed++;
         job.pending--;
+
+        if (existingLog) {
+          await supabaseAdmin
+            .from('email_logs')
+            .update({
+              status: 'Failed',
+              error_message:
+                'Student email address is missing.',
+              retry_count:
+                (existingLog.retry_count || 0) + 1,
+            })
+            .eq('id', existingLog.id);
+        }
+
         continue;
       }
 
       try {
-        // Step A: Generate PDF Certificate
-        currentLog.certStatus = 'Generating';
-        currentLog.emailStatus = 'Pending';
-        await JsonDb.write('delivery_logs', currentLogs); // Update database immediately
+        /*
+         * ------------------------------------------------
+         * A. Mark email as processing
+         * ------------------------------------------------
+         */
 
-        const pdfPath = await saveStudentPDF(template, student, mappings);
-        
-        currentLog.certStatus = 'Generated';
-        currentLog.pdfPath = pdfPath;
-        await JsonDb.write('delivery_logs', currentLogs);
+        if (existingLog) {
+          await supabaseAdmin
+            .from('email_logs')
+            .update({
+              status: 'Generating',
+              retry_count:
+                (existingLog.retry_count || 0) + 1,
+            })
+            .eq('id', existingLog.id);
+        } else {
+          await supabaseAdmin
+            .from('email_logs')
+            .insert({
+              user_id: userId,
+              campaign_id: campaignId,
+              student_id: studentRow.id,
+              recipient_email:
+                student.email,
+              subject:
+                campaign.email_subject || '',
+              status: 'Generating',
+              provider: 'SMTP',
+              retry_count: 1,
+            });
+        }
 
-        // Step B: Send SMTP Email
-        currentLog.emailStatus = 'Sending';
-        currentLog.attempts += 1;
-        await JsonDb.write('delivery_logs', currentLogs);
+        /*
+         * ------------------------------------------------
+         * B. Generate certificate PDF
+         * ------------------------------------------------
+         */
 
-        // Customize email subject and body dynamically
-        const emailSubject = replacePlaceholders(campaign.emailSubject, student, mappings);
-        const emailBody = replacePlaceholders(campaign.emailBody, student, mappings);
+        const pdfPath =
+          await saveStudentPDF(
+            template,
+            student,
+            mappings
+          );
 
-        await sendEmail(userId, student, student.email, emailSubject, emailBody, pdfPath);
+        /*
+         * ------------------------------------------------
+         * C. Build email
+         * ------------------------------------------------
+         */
 
-        // Success!
-        currentLog.emailStatus = 'Sent';
-        currentLog.sentAt = new Date().toISOString();
-        currentLog.error = undefined;
-        await JsonDb.write('delivery_logs', currentLogs);
+        const emailSubject =
+          replacePlaceholders(
+            campaign.email_subject || '',
+            student,
+            mappings
+          );
+
+        const emailBody =
+          replacePlaceholders(
+            campaign.email_body || '',
+            student,
+            mappings
+          );
+
+        /*
+         * ------------------------------------------------
+         * D. Mark Sending
+         * ------------------------------------------------
+         */
+
+        if (existingLog) {
+          await supabaseAdmin
+            .from('email_logs')
+            .update({
+              status: 'Sending',
+              subject: emailSubject,
+            })
+            .eq('id', existingLog.id);
+        }
+
+        /*
+         * ------------------------------------------------
+         * E. Send email
+         * ------------------------------------------------
+         */
+
+        await sendEmail(
+          userId,
+          student,
+          student.email,
+          emailSubject,
+          emailBody,
+          pdfPath
+        );
+
+        /*
+         * ------------------------------------------------
+         * F. Success
+         * ------------------------------------------------
+         */
+
+        if (existingLog) {
+          await supabaseAdmin
+            .from('email_logs')
+            .update({
+              status: 'Sent',
+              sent_at:
+                new Date().toISOString(),
+              error_message: null,
+              subject: emailSubject,
+            })
+            .eq('id', existingLog.id);
+        }
 
         job.completed++;
         job.sent++;
       } catch (err: any) {
-        console.error(`Failed to process student ${student.name} (${student.email}):`, err);
-        currentLog.emailStatus = 'Failed';
-        currentLog.error = err.message || String(err);
-        await JsonDb.write('delivery_logs', currentLogs);
+        console.error(
+          `Failed to process student ${student.name} (${student.email}):`,
+          err
+        );
+
+        const errorMessage =
+          err?.message ||
+          String(err);
+
+        if (existingLog) {
+          await supabaseAdmin
+            .from('email_logs')
+            .update({
+              status: 'Failed',
+              error_message:
+                errorMessage,
+            })
+            .eq('id', existingLog.id);
+        } else {
+          await supabaseAdmin
+            .from('email_logs')
+            .insert({
+              user_id: userId,
+              campaign_id: campaignId,
+              student_id: studentRow.id,
+              recipient_email:
+                student.email,
+              subject:
+                campaign.email_subject || '',
+              status: 'Failed',
+              provider: 'SMTP',
+              error_message:
+                errorMessage,
+              retry_count: 1,
+            });
+        }
 
         job.failed++;
+
+        /*
+         * Keep the actual error on the job so
+         * the frontend can display it.
+         */
+
+        job.error = errorMessage;
       } finally {
         job.pending--;
       }
 
-      // Throttling: Throttle sending to avoid SMTP limits (1000ms delay)
+      /*
+       * SMTP throttling.
+       */
+
       await sleep(1000);
     }
 
-    // Processing Finalized!
-    job.status = job.failed === job.total ? 'Failed' : 'Completed';
-    
-    // Save final status to campaign DB
-    await JsonDb.update<Campaign>('campaigns', campaignId, {
-      status: job.status === 'Completed' ? 'Completed' : 'Failed',
-    });
-  })().catch((err) => {
-    console.error('Fatal background campaign worker error:', err);
-    activeJobs[campaignId].status = 'Failed';
-    activeJobs[campaignId].error = err.message || String(err);
+    /*
+     * --------------------------------------------------
+     * 10. Final status
+     * --------------------------------------------------
+     */
+
+    if (
+      job.failed === job.total
+    ) {
+      job.status = 'Failed';
+    } else {
+      job.status = 'Completed';
+    }
+
+    /*
+     * Update campaign counters.
+     */
+
+    const {
+      data: currentCampaign,
+    } = await supabaseAdmin
+      .from('campaigns')
+      .select(
+        'total_students, emails_sent, emails_failed, pending_count'
+      )
+      .eq('id', campaignId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const currentTotal =
+      Number(
+        currentCampaign?.total_students
+      ) || job.total;
+
+    const currentSent =
+      Number(
+        currentCampaign?.emails_sent
+      ) || 0;
+
+    const currentFailed =
+      Number(
+        currentCampaign?.emails_failed
+      ) || 0;
+
+    await supabaseAdmin
+      .from('campaigns')
+      .update({
+        status:
+          job.status === 'Completed'
+            ? 'Completed'
+            : 'Failed',
+
+        total_students:
+          currentTotal,
+
+        emails_sent:
+          currentSent + job.sent,
+
+        emails_failed:
+          currentFailed + job.failed,
+
+        pending_count:
+          job.pending,
+
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq('id', campaignId)
+      .eq('user_id', userId);
+  })().catch(async (err: any) => {
+    console.error(
+      'Fatal background campaign worker error:',
+      err
+    );
+
+    const job =
+      activeJobs[campaignId];
+
+    if (job) {
+      job.status = 'Failed';
+      job.error =
+        err?.message ||
+        String(err);
+    }
+
+    await supabaseAdmin
+      .from('campaigns')
+      .update({
+        status: 'Failed',
+        updated_at:
+          new Date().toISOString(),
+      })
+      .eq('id', campaignId)
+      .eq('user_id', userId);
   });
 }
