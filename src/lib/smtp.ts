@@ -1,25 +1,94 @@
 import nodemailer from 'nodemailer';
 import path from 'path';
-import fs from 'fs/promises';
 import { JsonDb, Settings, Student } from './db';
+import { supabaseAdmin } from './supabase-admin';
 
-// CRITICAL SAFETY CHECK:
-// Before every email is sent, verify:
-// certificate.student_id === email.student_id AND certificate.recipient_email === student.email
+/* --------------------------------------------------
+   CERTIFICATE / EMAIL SAFETY CHECK
+-------------------------------------------------- */
+
 export function verifyEmailAssociation(
   student: Student,
   recipientEmail: string,
   pdfPath: string
 ): boolean {
-  // 1. Check if recipient email matches student email
-  const matchEmail = student.email.trim().toLowerCase() === recipientEmail.trim().toLowerCase();
-  
-  // 2. Check if the PDF file name corresponds to this student's certId (which is unique)
-  const fileName = path.basename(pdfPath);
-  const matchCertId = fileName.includes(student.certId);
+  if (!student.email || !recipientEmail) {
+    return false;
+  }
 
-  return matchEmail && matchCertId;
+  // Recipient must exactly match the student email.
+  const matchEmail =
+    student.email.trim().toLowerCase() ===
+    recipientEmail.trim().toLowerCase();
+
+  if (!matchEmail) {
+    return false;
+  }
+
+  // pdfPath is now a Supabase Storage path.
+  // Example:
+  // userId/campaignId/Student_Name_CERT-2026-00001.pdf
+
+  const fileName = path.basename(pdfPath);
+
+  const matchCertId =
+    !!student.certId &&
+    fileName.includes(student.certId);
+
+  return matchCertId;
 }
+
+/* --------------------------------------------------
+   DOWNLOAD CERTIFICATE FROM SUPABASE STORAGE
+-------------------------------------------------- */
+
+async function downloadCertificate(
+  pdfPath: string
+): Promise<Buffer> {
+  if (
+    !pdfPath ||
+    !pdfPath.trim()
+  ) {
+    throw new Error(
+      'Certificate storage path is missing.'
+    );
+  }
+
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin.storage
+      .from('certificates')
+      .download(
+        pdfPath
+      );
+
+  if (
+    error ||
+    !data
+  ) {
+    console.error(
+      'Supabase certificate download error:',
+      error
+    );
+
+    throw new Error(
+      `Certificate PDF could not be retrieved from storage: ${
+        error?.message ||
+        'File not found.'
+      }`
+    );
+  }
+
+  return Buffer.from(
+    await data.arrayBuffer()
+  );
+}
+
+/* --------------------------------------------------
+   SEND EMAIL
+-------------------------------------------------- */
 
 export async function sendEmail(
   userId: string,
@@ -29,67 +98,202 @@ export async function sendEmail(
   body: string,
   pdfPath: string
 ): Promise<string> {
-  // 1. CRITICAL Safety Association Guard
-  if (!verifyEmailAssociation(student, recipientEmail, pdfPath)) {
-    throw new Error('Certificate/email association validation failed.');
+
+  /* -----------------------------------------------
+     1. SECURITY VALIDATION
+  ----------------------------------------------- */
+
+  if (
+    !verifyEmailAssociation(
+      student,
+      recipientEmail,
+      pdfPath
+    )
+  ) {
+    throw new Error(
+      'Certificate/email association validation failed.'
+    );
   }
 
-  // 2. Verify PDF file exists on disk
+  /* -----------------------------------------------
+     2. DOWNLOAD PDF FROM SUPABASE STORAGE
+  ----------------------------------------------- */
+
+  const pdfBuffer =
+    await downloadCertificate(
+      pdfPath
+    );
+
+  /* -----------------------------------------------
+     3. LOAD SMTP SETTINGS
+  ----------------------------------------------- */
+
+  const settings =
+    await JsonDb.findOne<Settings>(
+      'settings',
+      { userId }
+    );
+
+  if (
+    !settings ||
+    !settings.smtpHost ||
+    !settings.smtpUser ||
+    !settings.smtpPass
+  ) {
+    throw new Error(
+      'SMTP configuration is missing. Go to Settings to configure your email provider.'
+    );
+  }
+
+  if (
+    !settings.smtpFromEmail
+  ) {
+    throw new Error(
+      'Sender email address is not configured. Go to Settings and enter your Gmail address.'
+    );
+  }
+
+  /* -----------------------------------------------
+     4. SMTP CONFIGURATION
+  ----------------------------------------------- */
+
+  const port =
+    Number(settings.smtpPort) ||
+    587;
+
+  const secure =
+    port === 465;
+
+  const requireTLS =
+    port === 587;
+
+  const transporter =
+    nodemailer.createTransport({
+      host:
+        settings.smtpHost,
+
+      port,
+
+      secure,
+
+      ...(requireTLS
+        ? {
+            requireTLS: true,
+          }
+        : {}),
+
+      auth: {
+        user:
+          settings.smtpUser,
+
+        pass:
+          settings.smtpPass,
+      },
+
+      tls: {
+        minVersion:
+          'TLSv1.2',
+      },
+
+      connectionTimeout:
+        30000,
+
+      greetingTimeout:
+        30000,
+
+      socketTimeout:
+        60000,
+    });
+
+  /* -----------------------------------------------
+     5. VERIFY SMTP CONNECTION
+  ----------------------------------------------- */
+
   try {
-    await fs.access(pdfPath);
-  } catch {
-    throw new Error(`Certificate PDF file not found at path: ${pdfPath}`);
+    await transporter.verify();
+  } catch (error: any) {
+    console.error(
+      'SMTP verification failed:',
+      error
+    );
+
+    throw new Error(
+      `SMTP connection failed: ${
+        error?.message ||
+        'Unable to connect to SMTP server.'
+      }`
+    );
   }
 
-  // 3. Fetch user SMTP settings
-  const settings = await JsonDb.findOne<Settings>('settings', { userId });
-  if (!settings || !settings.smtpHost || !settings.smtpUser || !settings.smtpPass) {
-    throw new Error('SMTP configuration is missing. Go to Settings to configure your email provider.');
-  }
-  if (!settings.smtpFromEmail) {
-    throw new Error('Sender email address (smtpFromEmail) is not configured. Go to Settings and enter your verified sender address.');
-  }
+  /* -----------------------------------------------
+     6. CREATE ATTACHMENT
+  ----------------------------------------------- */
 
-  // 4. Create Nodemailer Transport
-  // Security is determined by port:
-  //   465  → implicit TLS  (secure: true)
-  //   587  → STARTTLS      (secure: false, requireTLS: true)
-  //   25   → plain SMTP    (secure: false)
-  const port = settings.smtpPort ?? 587;
-  const secure = port === 465;
-  const requireTLS = port === 587;
+  const fileName =
+    path.basename(
+      pdfPath
+    );
 
-  const transporter = nodemailer.createTransport({
-    host: settings.smtpHost,
-    port,
-    secure,
-    ...(requireTLS ? { requireTLS: true } : {}),
-    auth: {
-      user: settings.smtpUser,
-      pass: settings.smtpPass,
-    },
-    tls: {
-      minVersion: 'TLSv1.2',
-    },
-  });
-
-  // 5. Build and send mail message
-  // smtpUser is the SMTP auth credential (e.g. "resend") — NOT used as the From address.
-  // smtpFromEmail is the verified sender address that appears in the From header.
-  const fromName = settings.smtpFrom || 'Certificate Builder';
   const mailOptions = {
-    from: `"${fromName}" <${settings.smtpFromEmail}>`,
-    to: recipientEmail,
-    subject: subject,
-    text: body, // plain text
+    from:
+      `"${settings.smtpFrom || 'Certificate Builder'}" <${settings.smtpFromEmail}>`,
+
+    to:
+      recipientEmail.trim(),
+
+    subject:
+      subject || 'Certificate',
+
+    text:
+      body || '',
+
     attachments: [
       {
-        filename: path.basename(pdfPath),
-        path: pdfPath,
+        filename:
+          fileName,
+
+        content:
+          pdfBuffer,
+
+        contentType:
+          'application/pdf',
       },
     ],
   };
 
-  const info = await transporter.sendMail(mailOptions);
-  return info.messageId;
+  /* -----------------------------------------------
+     7. SEND EMAIL
+  ----------------------------------------------- */
+
+  try {
+    const info =
+      await transporter.sendMail(
+        mailOptions
+      );
+
+    console.log(
+      `Certificate email sent successfully to ${recipientEmail}`,
+      {
+        messageId:
+          info.messageId,
+
+        certificate:
+          student.certId,
+      }
+    );
+
+    return info.messageId;
+  } catch (error: any) {
+    console.error(
+      'SMTP email sending failed:',
+      error
+    );
+
+    throw new Error(
+      `Email delivery failed: ${
+        error?.message ||
+        'Unknown SMTP error.'
+      }`
+    );
+  }
 }

@@ -4,45 +4,32 @@ import {
   rgb,
 } from 'pdf-lib';
 
-import fs from 'fs/promises';
-import path from 'path';
-
 import {
   Template,
   Student,
 } from './db';
 
+import { supabaseAdmin } from './supabase-admin';
+
 /* --------------------------------------------------
    COLORS
 -------------------------------------------------- */
 
-export function parseColor(
-  hex?: string
-) {
+export function parseColor(hex?: string) {
   if (!hex) {
     return rgb(0, 0, 0);
   }
 
-  const cleanHex =
-    hex.replace('#', '');
+  const cleanHex = hex.replace('#', '');
 
   const r =
-    parseInt(
-      cleanHex.substring(0, 2),
-      16
-    ) / 255;
+    parseInt(cleanHex.substring(0, 2), 16) / 255;
 
   const g =
-    parseInt(
-      cleanHex.substring(2, 4),
-      16
-    ) / 255;
+    parseInt(cleanHex.substring(2, 4), 16) / 255;
 
   const b =
-    parseInt(
-      cleanHex.substring(4, 6),
-      16
-    ) / 255;
+    parseInt(cleanHex.substring(4, 6), 16) / 255;
 
   return rgb(
     isNaN(r) ? 0 : r,
@@ -61,14 +48,11 @@ export function wrapText(
   font: any,
   fontSize: number
 ): string[] {
-  const paragraphs =
-    text.split(/\r?\n/);
-
+  const paragraphs = text.split(/\r?\n/);
   const lines: string[] = [];
 
   for (const paragraph of paragraphs) {
-    const words =
-      paragraph.split(/\s+/);
+    const words = paragraph.split(/\s+/);
 
     let currentLine = '';
 
@@ -81,10 +65,9 @@ export function wrapText(
     }
 
     for (const word of words) {
-      const testLine =
-        currentLine
-          ? `${currentLine} ${word}`
-          : word;
+      const testLine = currentLine
+        ? `${currentLine} ${word}`
+        : word;
 
       const width =
         font.widthOfTextAtSize(
@@ -96,21 +79,15 @@ export function wrapText(
         width > maxWidth &&
         currentLine
       ) {
-        lines.push(
-          currentLine
-        );
-
+        lines.push(currentLine);
         currentLine = word;
       } else {
-        currentLine =
-          testLine;
+        currentLine = testLine;
       }
     }
 
     if (currentLine) {
-      lines.push(
-        currentLine
-      );
+      lines.push(currentLine);
     }
   }
 
@@ -126,85 +103,53 @@ export function replacePlaceholders(
   student: Student,
   mappings: Record<string, string>
 ): string {
-  const data: Record<
-    string,
-    string
-  > = {
-    student_name:
-      student.name || '',
-
-    email:
-      student.email || '',
-
-    college_name:
-      student.collegeName || '',
-
-    course:
-      student.course || '',
-
-    department:
-      student.department || '',
-
-    internship_role:
-      student.role || '',
-
+  const data: Record<string, string> = {
+    student_name: student.name || '',
+    email: student.email || '',
+    college_name: student.collegeName || '',
+    course: student.course || '',
+    department: student.department || '',
+    internship_role: student.role || '',
     organization_name:
-      student.organizationName ||
-      '',
-
-    start_date:
-      student.startDate || '',
-
-    end_date:
-      student.endDate || '',
-
+      student.organizationName || '',
+    start_date: student.startDate || '',
+    end_date: student.endDate || '',
     certificate_date:
       student.certDate || '',
-
     certificate_id:
       student.certId || '',
-
-    ...(student.customFields ||
-      {}),
+    ...(student.customFields || {}),
   };
 
-  let replaced =
-    text || '';
+  let replaced = text || '';
 
-  Object.entries(
-    data
-  ).forEach(
+  Object.entries(data).forEach(
     ([key, value]) => {
-      const safeValue =
-        value || '';
+      const safeValue = value || '';
 
-      replaced =
-        replaced.replace(
+      replaced = replaced.replace(
+        new RegExp(
+          `{{\\s*${escapeRegExp(
+            key
+          )}\\s*}}`,
+          'gi'
+        ),
+        safeValue
+      );
+
+      const mappedHeader =
+        mappings?.[key];
+
+      if (mappedHeader) {
+        replaced = replaced.replace(
           new RegExp(
             `{{\\s*${escapeRegExp(
-              key
+              mappedHeader
             )}\\s*}}`,
             'gi'
           ),
           safeValue
         );
-
-      const mappedHeader =
-        mappings?.[key];
-
-      if (
-        mappedHeader
-      ) {
-        replaced =
-          replaced.replace(
-            new RegExp(
-              `{{\\s*${escapeRegExp(
-                mappedHeader
-              )}\\s*}}`,
-              'gi'
-            ),
-            safeValue
-          );
       }
     }
   );
@@ -232,8 +177,7 @@ function getAutoFitFontSize(
   minSize: number,
   maxWidth: number
 ) {
-  let size =
-    requestedSize;
+  let size = requestedSize;
 
   while (
     size > minSize &&
@@ -262,67 +206,64 @@ export async function generatePDF(
 ): Promise<Uint8Array> {
   let pdfDoc: PDFDocument;
 
-  const embedFonts =
-    async (
-      doc: PDFDocument
-    ) => {
-      return {
-        helvetica:
-          await doc.embedFont(
-            StandardFonts.Helvetica
-          ),
+  const embedFonts = async (
+    doc: PDFDocument
+  ) => {
+    return {
+      helvetica:
+        await doc.embedFont(
+          StandardFonts.Helvetica
+        ),
 
-        helveticaBold:
-          await doc.embedFont(
-            StandardFonts.HelveticaBold
-          ),
+      helveticaBold:
+        await doc.embedFont(
+          StandardFonts.HelveticaBold
+        ),
 
-        helveticaOblique:
-          await doc.embedFont(
-            StandardFonts.HelveticaOblique
-          ),
+      helveticaOblique:
+        await doc.embedFont(
+          StandardFonts.HelveticaOblique
+        ),
 
-        timesRoman:
-          await doc.embedFont(
-            StandardFonts.TimesRoman
-          ),
+      timesRoman:
+        await doc.embedFont(
+          StandardFonts.TimesRoman
+        ),
 
-        timesRomanBold:
-          await doc.embedFont(
-            StandardFonts.TimesRomanBold
-          ),
+      timesRomanBold:
+        await doc.embedFont(
+          StandardFonts.TimesRomanBold
+        ),
 
-        timesRomanItalic:
-          await doc.embedFont(
-            StandardFonts.TimesRomanItalic
-          ),
+      timesRomanItalic:
+        await doc.embedFont(
+          StandardFonts.TimesRomanItalic
+        ),
 
-        courier:
-          await doc.embedFont(
-            StandardFonts.Courier
-          ),
+      courier:
+        await doc.embedFont(
+          StandardFonts.Courier
+        ),
 
-        courierBold:
-          await doc.embedFont(
-            StandardFonts.CourierBold
-          ),
-      };
+      courierBold:
+        await doc.embedFont(
+          StandardFonts.CourierBold
+        ),
     };
+  };
 
   /* ------------------------------------------------
      BACKGROUND
   ------------------------------------------------ */
 
   if (
-    template.type ===
-      'upload' &&
+    template.type === 'upload' &&
     template.backgroundImage?.startsWith(
       'data:application/pdf;base64,'
     )
   ) {
     const pdfBase64 =
-      template.backgroundImage
-        .split(',')[1];
+      template.backgroundImage.split(',')[1];
 
     const pdfBytes =
       Buffer.from(
@@ -338,9 +279,7 @@ export async function generatePDF(
     pdfDoc =
       await PDFDocument.create();
 
-    const [
-      copiedPage,
-    ] =
+    const [copiedPage] =
       await pdfDoc.copyPages(
         templateDoc,
         [0]
@@ -373,15 +312,11 @@ export async function generatePDF(
     ) {
       try {
         const parts =
-          template.backgroundImage.split(
-            ','
-          );
+          template.backgroundImage.split(',');
 
         const mime =
           parts[0]
-            .match(
-              /:(.*?);/
-            )?.[1] || '';
+            .match(/:(.*?);/)?.[1] || '';
 
         const imgBytes =
           Buffer.from(
@@ -392,9 +327,7 @@ export async function generatePDF(
         let image;
 
         if (
-          mime.includes(
-            'png'
-          )
+          mime.includes('png')
         ) {
           image =
             await pdfDoc.embedPng(
@@ -439,6 +372,10 @@ export async function generatePDF(
       pdfDoc
     );
 
+  /* ------------------------------------------------
+     FONT SELECTION
+  ------------------------------------------------ */
+
   const getFont = (
     family?: string,
     weight?: string,
@@ -452,26 +389,17 @@ export async function generatePDF(
       style === 'italic';
 
     const familyName =
-      family?.toLowerCase() ||
-      '';
+      family?.toLowerCase() || '';
 
     if (
-      familyName.includes(
-        'times'
-      ) ||
-      familyName.includes(
-        'serif'
-      )
+      familyName.includes('times') ||
+      familyName.includes('serif')
     ) {
-      if (
-        isBold
-      ) {
+      if (isBold) {
         return fonts.timesRomanBold;
       }
 
-      if (
-        isItalic
-      ) {
+      if (isItalic) {
         return fonts.timesRomanItalic;
       }
 
@@ -479,27 +407,19 @@ export async function generatePDF(
     }
 
     if (
-      familyName.includes(
-        'courier'
-      ) ||
-      familyName.includes(
-        'mono'
-      )
+      familyName.includes('courier') ||
+      familyName.includes('mono')
     ) {
       return isBold
         ? fonts.courierBold
         : fonts.courier;
     }
 
-    if (
-      isBold
-    ) {
+    if (isBold) {
       return fonts.helveticaBold;
     }
 
-    if (
-      isItalic
-    ) {
+    if (isItalic) {
       return fonts.helveticaOblique;
     }
 
@@ -537,37 +457,29 @@ export async function generatePDF(
 
     if (bodyElement) {
       const designWidth =
-        template.width ||
-        842;
+        template.width || 842;
 
       const designHeight =
-        template.height ||
-        595;
+        template.height || 595;
 
       const scaleX =
-        pdfWidth /
-        designWidth;
+        pdfWidth / designWidth;
 
       const scaleY =
-        pdfHeight /
-        designHeight;
+        pdfHeight / designHeight;
 
       const x =
-        bodyElement.x *
-        scaleX;
+        bodyElement.x * scaleX;
 
       const topY =
-        bodyElement.y *
-        scaleY;
+        bodyElement.y * scaleY;
 
       const width =
-        (bodyElement.width ||
-          600) *
+        (bodyElement.width || 600) *
         scaleX;
 
       const height =
-        (bodyElement.height ||
-          180) *
+        (bodyElement.height || 180) *
         scaleY;
 
       const font =
@@ -578,8 +490,7 @@ export async function generatePDF(
         );
 
       let fontSize =
-        (bodyElement.fontSize ||
-          16) *
+        (bodyElement.fontSize || 16) *
         Math.min(
           scaleX,
           scaleY
@@ -589,7 +500,7 @@ export async function generatePDF(
         bodyElement.minFontSize ||
         10;
 
-      const lines =
+      let lines =
         wrapText(
           bodyText,
           width - 10,
@@ -597,7 +508,7 @@ export async function generatePDF(
           fontSize
         );
 
-      const lineHeight =
+      let lineHeight =
         fontSize *
         (bodyElement.lineHeight ||
           1.35);
@@ -618,28 +529,27 @@ export async function generatePDF(
           minFontSize
       ) {
         fontSize -= 1;
-      }
 
-      const finalLines =
-        wrapText(
-          bodyText,
-          width - 10,
-          font,
-          fontSize
-        );
+        lineHeight =
+          fontSize *
+          (bodyElement.lineHeight ||
+            1.35);
+
+        lines =
+          wrapText(
+            bodyText,
+            width - 10,
+            font,
+            fontSize
+          );
+      }
 
       const drawTop =
         pdfHeight -
         topY;
 
-      finalLines
-        .slice(
-          0,
-          Math.max(
-            maxLines,
-            1
-          )
-        )
+      lines
+        .slice(0, maxLines)
         .forEach(
           (
             line,
@@ -681,25 +591,16 @@ export async function generatePDF(
                 lineHeight;
 
             if (
-              lineY >
-                0 &&
-              lineY <
-                pdfHeight
+              lineY > 0 &&
+              lineY < pdfHeight
             ) {
               page.drawText(
                 line,
                 {
-                  x:
-                    drawX,
-
-                  y:
-                    lineY,
-
-                  size:
-                    fontSize,
-
+                  x: drawX,
+                  y: lineY,
+                  size: fontSize,
                   font,
-
                   color:
                     parseColor(
                       bodyElement.color ||
@@ -719,10 +620,12 @@ export async function generatePDF(
 
   const elements =
     [
-      ...(template.elements ||
-        []),
+      ...(template.elements || []),
     ].sort(
-      (a: any, b: any) =>
+      (
+        a: any,
+        b: any
+      ) =>
         (a.zIndex || 0) -
         (b.zIndex || 0)
     );
@@ -731,7 +634,8 @@ export async function generatePDF(
     const element of elements
   ) {
     /*
-     * Certificate body is handled above.
+     * Certificate body is already
+     * rendered above.
      */
     if (
       element.id ===
@@ -741,47 +645,41 @@ export async function generatePDF(
     }
 
     const designWidth =
-      template.width ||
-      842;
+      template.width || 842;
 
     const designHeight =
-      template.height ||
-      595;
+      template.height || 595;
 
     const scaleX =
-      pdfWidth /
-      designWidth;
+      pdfWidth / designWidth;
 
     const scaleY =
-      pdfHeight /
-      designHeight;
+      pdfHeight / designHeight;
 
     const elX =
-      element.x *
-      scaleX;
+      element.x * scaleX;
 
     const elY =
       pdfHeight -
-      element.y *
-        scaleY;
+      element.y * scaleY;
 
     const elWidth =
-      (element.width ||
-        200) *
+      (element.width || 200) *
       scaleX;
 
     const elHeight =
-      (element.height ||
-        40) *
+      (element.height || 40) *
       scaleY;
 
+    /* ----------------------------------------------
+       TEXT
+    ---------------------------------------------- */
+
     if (
-      element.type ===
-      'text'
+      element.type === 'text'
     ) {
       const textRaw =
-        element.text ||
-        '';
+        element.text || '';
 
       const textContent =
         replacePlaceholders(
@@ -798,8 +696,7 @@ export async function generatePDF(
         );
 
       const requestedSize =
-        (element.fontSize ||
-          14) *
+        (element.fontSize || 14) *
         Math.min(
           scaleX,
           scaleY
@@ -807,24 +704,16 @@ export async function generatePDF(
 
       const minSize =
         (element as any)
-          .minFontSize ||
-        8;
+          .minFontSize || 8;
 
       let fontSize =
         requestedSize;
 
-      /*
-       * Automatic fitting for
-       * student name and role.
-       */
       const autoFit =
         (element as any)
-          .autoFit ===
-        true;
+          .autoFit === true;
 
-      if (
-        autoFit
-      ) {
+      if (autoFit) {
         fontSize =
           getAutoFitFontSize(
             textContent,
@@ -840,7 +729,7 @@ export async function generatePDF(
           element.color
         );
 
-      const lines =
+      let lines =
         wrapText(
           textContent,
           elWidth - 8,
@@ -848,10 +737,40 @@ export async function generatePDF(
           fontSize
         );
 
-      const lineHeight =
+      let lineHeight =
         (element.lineHeight ||
           1.2) *
         fontSize;
+
+      /*
+       * If text is taller than
+       * its element, reduce it.
+       */
+      const maxTextHeight =
+        elHeight;
+
+      while (
+        lines.length *
+          lineHeight >
+          maxTextHeight &&
+        fontSize >
+          minSize
+      ) {
+        fontSize -= 1;
+
+        lineHeight =
+          (element.lineHeight ||
+            1.2) *
+          fontSize;
+
+        lines =
+          wrapText(
+            textContent,
+            elWidth - 8,
+            font,
+            fontSize
+          );
+      }
 
       lines.forEach(
         (
@@ -895,25 +814,16 @@ export async function generatePDF(
           }
 
           if (
-            lineY >
-              0 &&
-            lineY <
-              pdfHeight
+            lineY > 0 &&
+            lineY < pdfHeight
           ) {
             page.drawText(
               line,
               {
-                x:
-                  drawX,
-
-                y:
-                  lineY,
-
-                size:
-                  fontSize,
-
+                x: drawX,
+                y: lineY,
+                size: fontSize,
                 font,
-
                 color,
               }
             );
@@ -922,15 +832,32 @@ export async function generatePDF(
       );
     }
 
+    /* ----------------------------------------------
+       IMAGE
+    ---------------------------------------------- */
+
     else if (
-      element.type ===
-      'image'
+      element.type === 'image'
     ) {
       try {
+        if (
+          typeof element.src !==
+          'string'
+        ) {
+          continue;
+        }
+
+        /*
+         * Currently supports data URLs.
+         */
+        if (
+          !element.src.includes(',')
+        ) {
+          continue;
+        }
+
         const parts =
-          element.src.split(
-            ','
-          );
+          element.src.split(',');
 
         const mime =
           parts[0]
@@ -947,9 +874,7 @@ export async function generatePDF(
         let image;
 
         if (
-          mime.includes(
-            'png'
-          )
+          mime.includes('png')
         ) {
           image =
             await pdfDoc.embedPng(
@@ -965,18 +890,12 @@ export async function generatePDF(
         page.drawImage(
           image,
           {
-            x:
-              elX,
-
+            x: elX,
             y:
               elY -
               elHeight,
-
-            width:
-              elWidth,
-
-            height:
-              elHeight,
+            width: elWidth,
+            height: elHeight,
           }
         );
       } catch (error) {
@@ -987,9 +906,12 @@ export async function generatePDF(
       }
     }
 
+    /* ----------------------------------------------
+       SHAPE
+    ---------------------------------------------- */
+
     else if (
-      element.type ===
-      'shape'
+      element.type === 'shape'
     ) {
       const color =
         parseColor(
@@ -1016,7 +938,6 @@ export async function generatePDF(
               x:
                 elX +
                 elWidth,
-
               y: elY,
             },
 
@@ -1038,18 +959,10 @@ export async function generatePDF(
       } else {
         page.drawRectangle(
           {
-            x:
-              elX,
-
-            y:
-              drawY,
-
-            width:
-              elWidth,
-
-            height:
-              elHeight,
-
+            x: elX,
+            y: drawY,
+            width: elWidth,
+            height: elHeight,
             color,
           }
         );
@@ -1061,7 +974,7 @@ export async function generatePDF(
 }
 
 /* --------------------------------------------------
-   SAVE PDF
+   SAVE PDF TO SUPABASE STORAGE
 -------------------------------------------------- */
 
 export async function saveStudentPDF(
@@ -1076,43 +989,114 @@ export async function saveStudentPDF(
       mappings
     );
 
-  const dirPath =
-    path.join(
-      process.cwd(),
-      'data',
-      'certificates',
-      student.campaignId
-    );
-
-  await fs.mkdir(
-    dirPath,
-    {
-      recursive:
-        true,
-    }
-  );
-
   const safeName =
-    `${
-      student.name
-        .replace(
-          /[^a-zA-Z0-9]/g,
-          '_'
-        )
-    }_${
-      student.certId
-    }.pdf`;
+    (student.name || 'student')
+      .replace(
+        /[^a-zA-Z0-9]/g,
+        '_'
+      );
 
-  const filePath =
-    path.join(
-      dirPath,
-      safeName
+  const safeCertId =
+    String(
+      student.certId ||
+        'certificate'
+    ).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_'
     );
 
-  await fs.writeFile(
-    filePath,
-    pdfBytes
-  );
+  /*
+   * Use userId when available.
+   *
+   * If your Student type doesn't
+   * currently contain userId, the
+   * fallback still keeps the file
+   * inside the campaign directory.
+   */
+  const userFolder =
+    (student as any).userId ||
+    'users';
 
-  return filePath;
+  const storagePath =
+    `${userFolder}/${student.campaignId}/${safeName}_${safeCertId}.pdf`;
+
+  /*
+   * Upload PDF directly from memory.
+   *
+   * NO fs.mkdir()
+   * NO fs.writeFile()
+   * NO process.cwd()
+   * NO /data directory
+   */
+  const {
+    error,
+  } =
+    await supabaseAdmin.storage
+      .from('certificates')
+      .upload(
+        storagePath,
+        Buffer.from(pdfBytes),
+        {
+          contentType:
+            'application/pdf',
+
+          upsert: true,
+        }
+      );
+
+  if (error) {
+    console.error(
+      'Supabase certificate upload error:',
+      error
+    );
+
+    throw new Error(
+      `Failed to store certificate: ${error.message}`
+    );
+  }
+
+  return storagePath;
+}
+
+/* --------------------------------------------------
+   DOWNLOAD PDF FROM SUPABASE STORAGE
+-------------------------------------------------- */
+
+export async function getStoredStudentPDF(
+  storagePath: string
+): Promise<Buffer> {
+  if (
+    !storagePath ||
+    !storagePath.trim()
+  ) {
+    throw new Error(
+      'Certificate storage path is missing.'
+    );
+  }
+
+  const {
+    data,
+    error,
+  } =
+    await supabaseAdmin.storage
+      .from('certificates')
+      .download(
+        storagePath
+      );
+
+  if (
+    error ||
+    !data
+  ) {
+    throw new Error(
+      `Failed to download certificate: ${
+        error?.message ||
+        'Certificate not found.'
+      }`
+    );
+  }
+
+  return Buffer.from(
+    await data.arrayBuffer()
+  );
 }
