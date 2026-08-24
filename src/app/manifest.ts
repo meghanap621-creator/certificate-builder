@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Certificate builder",
-    short_name: "certifibuilder",
-    description: "Bulk certificate generator for your campaigns",
+    name: "Certificate Builder",
+    short_name: "Certificate Builder",
+    description: "Create and manage certificates easily.",
     start_url: "/",
     display: "standalone",
     background_color: "#ffffff",
