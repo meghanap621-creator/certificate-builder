@@ -3,9 +3,9 @@ import path from 'path';
 import { JsonDb, Settings, Student } from './db';
 import { supabaseAdmin } from './supabase-admin';
 
-/* --------------------------------------------------
+/* =========================================================
    CERTIFICATE / EMAIL SAFETY CHECK
--------------------------------------------------- */
+========================================================= */
 
 export function verifyEmailAssociation(
   student: Student,
@@ -16,6 +16,7 @@ export function verifyEmailAssociation(
     console.error(
       'Email association failed: student is missing.'
     );
+
     return false;
   }
 
@@ -27,6 +28,7 @@ export function verifyEmailAssociation(
         studentName: student.name,
       }
     );
+
     return false;
   }
 
@@ -34,24 +36,30 @@ export function verifyEmailAssociation(
     console.error(
       'Email association failed: recipient email is missing.'
     );
+
     return false;
   }
 
   /*
-   * IMPORTANT:
-   * The recipient must belong to the student.
+   * The email recipient MUST match the email
+   * belonging to the current student.
    */
   const studentEmail =
-    student.email.trim().toLowerCase();
+    String(student.email)
+      .trim()
+      .toLowerCase();
 
   const targetEmail =
-    recipientEmail.trim().toLowerCase();
+    String(recipientEmail)
+      .trim()
+      .toLowerCase();
 
   if (studentEmail !== targetEmail) {
     console.error(
       'Email association failed: recipient does not match student.',
       {
         studentId: student.id,
+        studentName: student.name,
         studentEmail,
         targetEmail,
       }
@@ -61,17 +69,22 @@ export function verifyEmailAssociation(
   }
 
   /*
-   * Supabase Storage paths can use UUIDs or other
-   * generated filenames. Therefore we must NOT
-   * require the PDF filename to contain certId.
+   * Certificate files are stored in Supabase Storage.
    *
-   * We only require a valid storage path here.
+   * The storage filename/path does NOT have to contain
+   * the certificate ID because the application already
+   * generated this certificate for the current student.
    */
-  if (!pdfPath || !pdfPath.trim()) {
+  if (
+    !pdfPath ||
+    !String(pdfPath).trim()
+  ) {
     console.error(
       'Email association failed: certificate storage path is missing.',
       {
         studentId: student.id,
+        studentName: student.name,
+        certificateId: student.certId,
       }
     );
 
@@ -81,14 +94,17 @@ export function verifyEmailAssociation(
   return true;
 }
 
-/* --------------------------------------------------
+/* =========================================================
    DOWNLOAD CERTIFICATE FROM SUPABASE STORAGE
--------------------------------------------------- */
+========================================================= */
 
 async function downloadCertificate(
   pdfPath: string
 ): Promise<Buffer> {
-  if (!pdfPath || !pdfPath.trim()) {
+  const storagePath =
+    String(pdfPath || '').trim();
+
+  if (!storagePath) {
     throw new Error(
       'Certificate storage path is missing.'
     );
@@ -97,11 +113,15 @@ async function downloadCertificate(
   const {
     data,
     error,
-  } = await supabaseAdmin.storage
-    .from('certificates')
-    .download(pdfPath);
+  } =
+    await supabaseAdmin.storage
+      .from('certificates')
+      .download(storagePath);
 
-  if (error || !data) {
+  if (
+    error ||
+    !data
+  ) {
     console.error(
       'Supabase certificate download error:',
       error
@@ -120,9 +140,9 @@ async function downloadCertificate(
   );
 }
 
-/* --------------------------------------------------
+/* =========================================================
    SEND EMAIL
--------------------------------------------------- */
+========================================================= */
 
 export async function sendEmail(
   userId: string,
@@ -132,65 +152,98 @@ export async function sendEmail(
   body: string,
   pdfPath: string
 ): Promise<string> {
-  /* -----------------------------------------------
+  /* =======================================================
      1. SECURITY VALIDATION
-  ------------------------------------------------ */
+  ======================================================= */
 
-  if (
-    !verifyEmailAssociation(
+  const isAssociationValid =
+    verifyEmailAssociation(
       student,
       recipientEmail,
       pdfPath
-    )
-  ) {
+    );
+
+  if (!isAssociationValid) {
     throw new Error(
       'Certificate/email association validation failed.'
     );
   }
 
-  /* -----------------------------------------------
-     2. DOWNLOAD PDF FROM SUPABASE STORAGE
-  ------------------------------------------------ */
+  /* =======================================================
+     2. DOWNLOAD CERTIFICATE FROM SUPABASE STORAGE
+  ======================================================= */
 
   const pdfBuffer =
     await downloadCertificate(
       pdfPath
     );
 
-  /* -----------------------------------------------
-     3. LOAD SMTP SETTINGS
-  ------------------------------------------------ */
+  if (
+    !pdfBuffer ||
+    pdfBuffer.length === 0
+  ) {
+    throw new Error(
+      'Certificate PDF is empty.'
+    );
+  }
+
+  /* =======================================================
+     3. LOAD USER SMTP SETTINGS
+  ======================================================= */
 
   const settings =
     await JsonDb.findOne<Settings>(
       'settings',
-      { userId }
+      {
+        userId,
+      }
     );
 
   if (
-    !settings ||
-    !settings.smtpHost ||
-    !settings.smtpUser ||
-    !settings.smtpPass
+    !settings
   ) {
     throw new Error(
       'SMTP configuration is missing. Go to Settings to configure your email provider.'
     );
   }
 
-  if (!settings.smtpFromEmail) {
+  if (
+    !settings.smtpHost ||
+    !settings.smtpUser ||
+    !settings.smtpPass
+  ) {
     throw new Error(
-      'Sender email address is not configured. Go to Settings and enter your Gmail address.'
+      'SMTP configuration is incomplete. Please configure SMTP Host, Username, and Password in Settings.'
     );
   }
 
-  /* -----------------------------------------------
+  if (
+    !settings.smtpFromEmail
+  ) {
+    throw new Error(
+      'Sender email address is not configured. Go to Settings and enter your verified sender email.'
+    );
+  }
+
+  /* =======================================================
      4. SMTP CONFIGURATION
-  ------------------------------------------------ */
+  ======================================================= */
 
   const port =
-    Number(settings.smtpPort) || 587;
+    Number(
+      settings.smtpPort
+    ) || 587;
 
+  /*
+   * Port 465:
+   * Implicit TLS
+   *
+   * Port 587:
+   * STARTTLS
+   *
+   * Port 25:
+   * Plain SMTP
+   */
   const secure =
     port === 465;
 
@@ -199,7 +252,8 @@ export async function sendEmail(
 
   const transporter =
     nodemailer.createTransport({
-      host: settings.smtpHost,
+      host:
+        settings.smtpHost,
 
       port,
 
@@ -212,28 +266,48 @@ export async function sendEmail(
         : {}),
 
       auth: {
-        user: settings.smtpUser,
-        pass: settings.smtpPass,
+        user:
+          settings.smtpUser,
+
+        pass:
+          settings.smtpPass,
       },
 
       tls: {
-        minVersion: 'TLSv1.2',
+        minVersion:
+          'TLSv1.2',
       },
 
-      connectionTimeout: 30000,
+      connectionTimeout:
+        30000,
 
-      greetingTimeout: 30000,
+      greetingTimeout:
+        30000,
 
-      socketTimeout: 60000,
+      socketTimeout:
+        60000,
     });
 
-  /* -----------------------------------------------
+  /* =======================================================
      5. VERIFY SMTP CONNECTION
-  ------------------------------------------------ */
+  ======================================================= */
 
   try {
     await transporter.verify();
-  } catch (error: any) {
+
+    console.log(
+      'SMTP connection verified successfully.',
+      {
+        host:
+          settings.smtpHost,
+        port,
+        user:
+          settings.smtpUser,
+      }
+    );
+  } catch (
+    error: any
+  ) {
     console.error(
       'SMTP verification failed:',
       error
@@ -247,25 +321,41 @@ export async function sendEmail(
     );
   }
 
-  /* -----------------------------------------------
-     6. CREATE EMAIL ATTACHMENT
-  ------------------------------------------------ */
+  /* =======================================================
+     6. PREPARE EMAIL
+  ======================================================= */
+
+  const safeRecipient =
+    recipientEmail.trim();
+
+  const safeSubject =
+    subject?.trim() ||
+    'Certificate';
+
+  const safeBody =
+    body || '';
 
   const fileName =
-    path.basename(pdfPath);
+    path.basename(
+      pdfPath
+    ) || 'certificate.pdf';
+
+  const fromName =
+    settings.smtpFrom?.trim() ||
+    'Certificate Builder';
 
   const mailOptions = {
     from:
-      `"${settings.smtpFrom || 'Certificate Builder'}" <${settings.smtpFromEmail}>`,
+      `"${fromName}" <${settings.smtpFromEmail.trim()}>`,
 
     to:
-      recipientEmail.trim(),
+      safeRecipient,
 
     subject:
-      subject || 'Certificate',
+      safeSubject,
 
     text:
-      body || '',
+      safeBody,
 
     attachments: [
       {
@@ -281,9 +371,9 @@ export async function sendEmail(
     ],
   };
 
-  /* -----------------------------------------------
+  /* =======================================================
      7. SEND EMAIL
-  ------------------------------------------------ */
+  ======================================================= */
 
   try {
     const info =
@@ -292,7 +382,7 @@ export async function sendEmail(
       );
 
     console.log(
-      `Certificate email sent successfully to ${recipientEmail}`,
+      'Certificate email sent successfully.',
       {
         messageId:
           info.messageId,
@@ -303,13 +393,20 @@ export async function sendEmail(
         studentName:
           student.name,
 
-        certificate:
+        recipient:
+          safeRecipient,
+
+        certificateId:
           student.certId,
+
+        fileName,
       }
     );
 
     return info.messageId;
-  } catch (error: any) {
+  } catch (
+    error: any
+  ) {
     console.error(
       'SMTP email sending failed:',
       error
