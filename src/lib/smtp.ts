@@ -4,7 +4,7 @@ import { JsonDb, Settings, Student } from './db';
 import { supabaseAdmin } from './supabase-admin';
 
 /* =========================================================
-   CERTIFICATE / EMAIL SAFETY CHECK
+   CERTIFICATE / EMAIL ASSOCIATION VALIDATION
 ========================================================= */
 
 export function verifyEmailAssociation(
@@ -12,17 +12,52 @@ export function verifyEmailAssociation(
   recipientEmail: string,
   pdfPath: string
 ): boolean {
+  console.log(
+    '========== EMAIL ASSOCIATION CHECK =========='
+  );
+
+  console.log(
+    'Student:',
+    {
+      id: student?.id,
+      name: student?.name,
+      email: student?.email,
+      certId: student?.certId,
+    }
+  );
+
+  console.log(
+    'Recipient:',
+    recipientEmail
+  );
+
+  console.log(
+    'Certificate path:',
+    pdfPath
+  );
+
+  /* -------------------------------------------------------
+     CHECK 1 — STUDENT
+  ------------------------------------------------------- */
+
   if (!student) {
     console.error(
-      'Email association failed: student is missing.'
+      'ASSOCIATION FAILED: student is missing.'
     );
 
     return false;
   }
 
-  if (!student.email) {
+  /* -------------------------------------------------------
+     CHECK 2 — STUDENT EMAIL
+  ------------------------------------------------------- */
+
+  if (
+    !student.email ||
+    !String(student.email).trim()
+  ) {
     console.error(
-      'Email association failed: student email is missing.',
+      'ASSOCIATION FAILED: student email is missing.',
       {
         studentId: student.id,
         studentName: student.name,
@@ -32,18 +67,29 @@ export function verifyEmailAssociation(
     return false;
   }
 
-  if (!recipientEmail) {
+  /* -------------------------------------------------------
+     CHECK 3 — RECIPIENT EMAIL
+  ------------------------------------------------------- */
+
+  if (
+    !recipientEmail ||
+    !String(recipientEmail).trim()
+  ) {
     console.error(
-      'Email association failed: recipient email is missing.'
+      'ASSOCIATION FAILED: recipient email is missing.',
+      {
+        studentId: student.id,
+        studentName: student.name,
+      }
     );
 
     return false;
   }
 
-  /*
-   * The email recipient MUST match the email
-   * belonging to the current student.
-   */
+  /* -------------------------------------------------------
+     NORMALIZE EMAILS
+  ------------------------------------------------------- */
+
   const studentEmail =
     String(student.email)
       .trim()
@@ -54,42 +100,91 @@ export function verifyEmailAssociation(
       .trim()
       .toLowerCase();
 
-  if (studentEmail !== targetEmail) {
+  console.log(
+    'Normalized student email:',
+    studentEmail
+  );
+
+  console.log(
+    'Normalized recipient email:',
+    targetEmail
+  );
+
+  /* -------------------------------------------------------
+     CHECK 4 — EMAIL ASSOCIATION
+  ------------------------------------------------------- */
+
+  if (
+    studentEmail !== targetEmail
+  ) {
     console.error(
-      'Email association failed: recipient does not match student.',
+      'ASSOCIATION FAILED: EMAIL MISMATCH.',
       {
-        studentId: student.id,
-        studentName: student.name,
+        studentId:
+          student.id,
+
+        studentName:
+          student.name,
+
         studentEmail,
+
         targetEmail,
+
+        certificateId:
+          student.certId,
       }
     );
 
     return false;
   }
 
-  /*
-   * Certificate files are stored in Supabase Storage.
-   *
-   * The storage filename/path does NOT have to contain
-   * the certificate ID because the application already
-   * generated this certificate for the current student.
-   */
+  /* -------------------------------------------------------
+     CHECK 5 — CERTIFICATE PATH
+  ------------------------------------------------------- */
+
   if (
     !pdfPath ||
     !String(pdfPath).trim()
   ) {
     console.error(
-      'Email association failed: certificate storage path is missing.',
+      'ASSOCIATION FAILED: certificate storage path is missing.',
       {
-        studentId: student.id,
-        studentName: student.name,
-        certificateId: student.certId,
+        studentId:
+          student.id,
+
+        studentName:
+          student.name,
+
+        certificateId:
+          student.certId,
       }
     );
 
     return false;
   }
+
+  console.log(
+    'ASSOCIATION PASSED.',
+    {
+      studentId:
+        student.id,
+
+      studentName:
+        student.name,
+
+      email:
+        studentEmail,
+
+      certificateId:
+        student.certId,
+
+      pdfPath,
+    }
+  );
+
+  console.log(
+    '============================================='
+  );
 
   return true;
 }
@@ -102,7 +197,9 @@ async function downloadCertificate(
   pdfPath: string
 ): Promise<Buffer> {
   const storagePath =
-    String(pdfPath || '').trim();
+    String(
+      pdfPath || ''
+    ).trim();
 
   if (!storagePath) {
     throw new Error(
@@ -110,13 +207,20 @@ async function downloadCertificate(
     );
   }
 
+  console.log(
+    'Downloading certificate from Supabase Storage:',
+    storagePath
+  );
+
   const {
     data,
     error,
   } =
     await supabaseAdmin.storage
       .from('certificates')
-      .download(storagePath);
+      .download(
+        storagePath
+      );
 
   if (
     error ||
@@ -135,9 +239,31 @@ async function downloadCertificate(
     );
   }
 
-  return Buffer.from(
-    await data.arrayBuffer()
+  const buffer =
+    Buffer.from(
+      await data.arrayBuffer()
+    );
+
+  if (
+    buffer.length === 0
+  ) {
+    throw new Error(
+      'Certificate PDF retrieved from storage is empty.'
+    );
+  }
+
+  console.log(
+    'Certificate downloaded successfully.',
+    {
+      path:
+        storagePath,
+
+      size:
+        buffer.length,
+    }
   );
+
+  return buffer;
 }
 
 /* =========================================================
@@ -153,24 +279,26 @@ export async function sendEmail(
   pdfPath: string
 ): Promise<string> {
   /* =======================================================
-     1. SECURITY VALIDATION
+     1. SECURITY / ASSOCIATION VALIDATION
   ======================================================= */
 
-  const isAssociationValid =
+  const associationValid =
     verifyEmailAssociation(
       student,
       recipientEmail,
       pdfPath
     );
 
-  if (!isAssociationValid) {
+  if (
+    !associationValid
+  ) {
     throw new Error(
       'Certificate/email association validation failed.'
     );
   }
 
   /* =======================================================
-     2. DOWNLOAD CERTIFICATE FROM SUPABASE STORAGE
+     2. DOWNLOAD PDF
   ======================================================= */
 
   const pdfBuffer =
@@ -178,17 +306,8 @@ export async function sendEmail(
       pdfPath
     );
 
-  if (
-    !pdfBuffer ||
-    pdfBuffer.length === 0
-  ) {
-    throw new Error(
-      'Certificate PDF is empty.'
-    );
-  }
-
   /* =======================================================
-     3. LOAD USER SMTP SETTINGS
+     3. LOAD SMTP SETTINGS
   ======================================================= */
 
   const settings =
@@ -199,9 +318,7 @@ export async function sendEmail(
       }
     );
 
-  if (
-    !settings
-  ) {
+  if (!settings) {
     throw new Error(
       'SMTP configuration is missing. Go to Settings to configure your email provider.'
     );
@@ -234,16 +351,6 @@ export async function sendEmail(
       settings.smtpPort
     ) || 587;
 
-  /*
-   * Port 465:
-   * Implicit TLS
-   *
-   * Port 587:
-   * STARTTLS
-   *
-   * Port 25:
-   * Plain SMTP
-   */
   const secure =
     port === 465;
 
@@ -261,7 +368,8 @@ export async function sendEmail(
 
       ...(requireTLS
         ? {
-            requireTLS: true,
+            requireTLS:
+              true,
           }
         : {}),
 
@@ -289,7 +397,7 @@ export async function sendEmail(
     });
 
   /* =======================================================
-     5. VERIFY SMTP CONNECTION
+     5. VERIFY SMTP
   ======================================================= */
 
   try {
@@ -300,7 +408,9 @@ export async function sendEmail(
       {
         host:
           settings.smtpHost,
+
         port,
+
         user:
           settings.smtpUser,
       }
@@ -326,27 +436,41 @@ export async function sendEmail(
   ======================================================= */
 
   const safeRecipient =
-    recipientEmail.trim();
+    String(
+      recipientEmail
+    ).trim();
 
   const safeSubject =
-    subject?.trim() ||
+    String(
+      subject || ''
+    ).trim() ||
     'Certificate';
 
   const safeBody =
-    body || '';
+    String(
+      body || ''
+    );
 
   const fileName =
     path.basename(
       pdfPath
-    ) || 'certificate.pdf';
+    ) ||
+    'certificate.pdf';
 
   const fromName =
-    settings.smtpFrom?.trim() ||
-    'Certificate Builder';
+    String(
+      settings.smtpFrom ||
+        'Certificate Builder'
+    ).trim();
+
+  const senderEmail =
+    String(
+      settings.smtpFromEmail
+    ).trim();
 
   const mailOptions = {
     from:
-      `"${fromName}" <${settings.smtpFromEmail.trim()}>`,
+      `"${fromName}" <${senderEmail}>`,
 
     to:
       safeRecipient,
@@ -376,6 +500,25 @@ export async function sendEmail(
   ======================================================= */
 
   try {
+    console.log(
+      'Sending certificate email...',
+      {
+        studentId:
+          student.id,
+
+        studentName:
+          student.name,
+
+        recipient:
+          safeRecipient,
+
+        certificateId:
+          student.certId,
+
+        fileName,
+      }
+    );
+
     const info =
       await transporter.sendMail(
         mailOptions
