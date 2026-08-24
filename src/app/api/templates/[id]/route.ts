@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '@/lib/auth-middleware';
 import { supabaseAdmin } from '@/lib/supabase-admin';
 
+/* =========================================================
+   MAP DATABASE TEMPLATE → FRONTEND TEMPLATE
+========================================================= */
+
 function mapTemplate(template: any) {
-  const editorData = template.editor_data;
+  const editorData = template?.editor_data;
 
   let elements: any[] = [];
   let backgroundImage = '';
@@ -19,8 +23,7 @@ function mapTemplate(template: any) {
       : [];
 
     backgroundImage =
-      typeof editorData.backgroundImage ===
-      'string'
+      typeof editorData.backgroundImage === 'string'
         ? editorData.backgroundImage
         : '';
   }
@@ -46,20 +49,35 @@ function mapTemplate(template: any) {
 
     elements,
 
+    /*
+     * IMPORTANT:
+     * Certificate body is stored separately
+     * in templates.certificate_body.
+     */
     certificateBody:
-      typeof template.certificate_body ===
-      'string'
+      typeof template.certificate_body === 'string'
         ? template.certificate_body
         : '',
 
-    createdAt: template.created_at,
+    /*
+     * Keep dynamic fields available
+     * for the editor if they exist.
+     */
+    dynamicFields:
+      Array.isArray(template.dynamic_fields)
+        ? template.dynamic_fields
+        : [],
 
-    updatedAt: template.updated_at,
+    createdAt:
+      template.created_at,
+
+    updatedAt:
+      template.updated_at,
   };
 }
 
 /* =========================================================
-   GET SINGLE TEMPLATE
+   GET - FETCH SINGLE TEMPLATE
 ========================================================= */
 
 export async function GET(
@@ -73,7 +91,8 @@ export async function GET(
   }
 ) {
   try {
-    const user = await getAuthUser();
+    const user =
+      await getAuthUser();
 
     if (!user) {
       return NextResponse.json(
@@ -86,19 +105,41 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const { id } =
+      await params;
+
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Template ID is required.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     const {
       data,
       error,
-    } = await supabaseAdmin
-      .from('templates')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single();
+    } =
+      await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
 
-    if (error || !data) {
+    if (
+      error ||
+      !data
+    ) {
+      console.error(
+        'Fetch template error:',
+        error
+      );
+
       return NextResponse.json(
         {
           error:
@@ -147,7 +188,8 @@ export async function PUT(
   }
 ) {
   try {
-    const user = await getAuthUser();
+    const user =
+      await getAuthUser();
 
     if (!user) {
       return NextResponse.json(
@@ -160,29 +202,66 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    const { id } =
+      await params;
 
-    const updates =
-      await request.json();
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Template ID is required.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
-    /* -----------------------------------------------------
+    /* =====================================================
+       READ REQUEST BODY
+    ===================================================== */
+
+    let updates: any;
+
+    try {
+      updates =
+        await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            'Invalid request body.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /* =====================================================
        FIND EXISTING TEMPLATE
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const {
       data: existing,
       error: existingError,
-    } = await supabaseAdmin
-      .from('templates')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single();
+    } =
+      await supabaseAdmin
+        .from('templates')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
 
     if (
       existingError ||
       !existing
     ) {
+      console.error(
+        'Existing template lookup error:',
+        existingError
+      );
+
       return NextResponse.json(
         {
           error:
@@ -194,9 +273,9 @@ export async function PUT(
       );
     }
 
-    /* -----------------------------------------------------
+    /* =====================================================
        EXISTING EDITOR DATA
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const existingEditorData =
       existing.editor_data &&
@@ -205,24 +284,126 @@ export async function PUT(
         ? existing.editor_data
         : {};
 
-    /* -----------------------------------------------------
+    /* =====================================================
        ELEMENTS
-    ----------------------------------------------------- */
+    ===================================================== */
 
-    const elements =
+    let elements: any[];
+
+    if (
       Array.isArray(
         updates.elements
       )
-        ? updates.elements
-        : Array.isArray(
-            existingEditorData.elements
-          )
-          ? existingEditorData.elements
-          : [];
+    ) {
+      elements =
+        updates.elements;
+    } else if (
+      Array.isArray(
+        existingEditorData.elements
+      )
+    ) {
+      elements =
+        existingEditorData.elements;
+    } else {
+      elements = [];
+    }
 
-    /* -----------------------------------------------------
+    /*
+     * Make sure the certificate body
+     * element exists in the editor data.
+     *
+     * This is important for old templates
+     * created before the Certificate Body
+     * feature was added.
+     */
+
+    const certificateBodyElementIndex =
+      elements.findIndex(
+        (element: any) =>
+          element?.id ===
+            'certificate_body' ||
+          element?.id ===
+            'certificateBody'
+      );
+
+    if (
+      certificateBodyElementIndex === -1
+    ) {
+      elements = [
+        ...elements,
+
+        {
+          id: 'certificate_body',
+
+          type: 'text',
+
+          x: 121,
+
+          y: 370,
+
+          width: 600,
+
+          height: 140,
+
+          text:
+            '{{certificate_body}}',
+
+          fontSize: 16,
+
+          fontFamily:
+            'Helvetica',
+
+          fontWeight:
+            'normal',
+
+          color:
+            '#000000',
+
+          align:
+            'center',
+
+          lineHeight:
+            1.35,
+
+          zIndex: 5,
+
+          autoFit:
+            true,
+
+          minFontSize:
+            10,
+        },
+      ];
+    } else {
+      /*
+       * Make sure an existing body element
+       * continues to use the correct placeholder.
+       */
+
+      const existingBodyElement =
+        elements[
+          certificateBodyElementIndex
+        ];
+
+      elements[
+        certificateBodyElementIndex
+      ] = {
+        ...existingBodyElement,
+
+        id: 'certificate_body',
+
+        type:
+          existingBodyElement?.type ||
+          'text',
+
+        text:
+          '{{certificate_body}}',
+      };
+    }
+
+    /* =====================================================
        BACKGROUND IMAGE
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const backgroundImage =
       typeof updates.backgroundImage ===
@@ -233,9 +414,9 @@ export async function PUT(
           ? existingEditorData.backgroundImage
           : '';
 
-    /* -----------------------------------------------------
+    /* =====================================================
        PAGE SIZE
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const pageWidth =
       typeof updates.width ===
@@ -257,9 +438,66 @@ export async function PUT(
               595
           );
 
-    /* -----------------------------------------------------
+    /* =====================================================
+       CERTIFICATE BODY
+    ===================================================== */
+
+    /*
+     * CRITICAL:
+     *
+     * If certificateBody was supplied by the frontend,
+     * save it.
+     *
+     * If it was NOT supplied, preserve the old value.
+     *
+     * Therefore:
+     *
+     * Design Save
+     *    ↓
+     * does NOT erase Certificate Body.
+     *
+     * Certificate Body Save
+     *    ↓
+     * updates certificate_body.
+     */
+
+    let certificateBody =
+      typeof existing.certificate_body ===
+      'string'
+        ? existing.certificate_body
+        : '';
+
+    if (
+      typeof updates.certificateBody ===
+      'string'
+    ) {
+      certificateBody =
+        updates.certificateBody.trim();
+    }
+
+    /* =====================================================
+       DYNAMIC FIELDS
+    ===================================================== */
+
+    let dynamicFields =
+      Array.isArray(
+        existing.dynamic_fields
+      )
+        ? existing.dynamic_fields
+        : [];
+
+    if (
+      Array.isArray(
+        updates.dynamicFields
+      )
+    ) {
+      dynamicFields =
+        updates.dynamicFields;
+    }
+
+    /* =====================================================
        UPDATE DATA
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const updateData: Record<
       string,
@@ -277,13 +515,19 @@ export async function PUT(
       page_height:
         pageHeight,
 
+      certificate_body:
+        certificateBody,
+
+      dynamic_fields:
+        dynamicFields,
+
       updated_at:
         new Date().toISOString(),
     };
 
-    /* -----------------------------------------------------
+    /* =====================================================
        NAME
-    ----------------------------------------------------- */
+    ===================================================== */
 
     if (
       typeof updates.name ===
@@ -294,9 +538,9 @@ export async function PUT(
         updates.name.trim();
     }
 
-    /* -----------------------------------------------------
+    /* =====================================================
        TEMPLATE TYPE
-    ----------------------------------------------------- */
+    ===================================================== */
 
     if (
       typeof updates.type ===
@@ -307,59 +551,28 @@ export async function PUT(
         updates.type.trim();
     }
 
-    /* -----------------------------------------------------
-       CERTIFICATE BODY
-       
-       IMPORTANT:
-       Only update when certificateBody
-       was actually supplied.
-       
-       This prevents Design tab saves
-       from accidentally clearing the body.
-    ----------------------------------------------------- */
-
-    if (
-      typeof updates.certificateBody ===
-      'string'
-    ) {
-      updateData.certificate_body =
-        updates.certificateBody;
-    }
-
-    /* -----------------------------------------------------
-       DYNAMIC FIELDS
-    ----------------------------------------------------- */
-
-    if (
-      Array.isArray(
-        updates.dynamicFields
-      )
-    ) {
-      updateData.dynamic_fields =
-        updates.dynamicFields;
-    }
-
-    /* -----------------------------------------------------
+    /* =====================================================
        UPDATE SUPABASE
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const {
       data,
       error,
-    } = await supabaseAdmin
-      .from('templates')
-      .update(updateData)
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .select('*')
-      .single();
+    } =
+      await supabaseAdmin
+        .from('templates')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .select('*')
+        .single();
 
     if (
       error ||
       !data
     ) {
       console.error(
-        'Update template error:',
+        'Update template Supabase error:',
         error
       );
 
@@ -401,7 +614,7 @@ export async function PUT(
 }
 
 /* =========================================================
-   DELETE TEMPLATE
+   DELETE - DELETE TEMPLATE
 ========================================================= */
 
 export async function DELETE(
@@ -415,7 +628,8 @@ export async function DELETE(
   }
 ) {
   try {
-    const user = await getAuthUser();
+    const user =
+      await getAuthUser();
 
     if (!user) {
       return NextResponse.json(
@@ -428,21 +642,35 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    const { id } =
+      await params;
 
-    /* -----------------------------------------------------
+    if (!id) {
+      return NextResponse.json(
+        {
+          error:
+            'Template ID is required.',
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /* =====================================================
        CHECK OWNERSHIP
-    ----------------------------------------------------- */
+    ===================================================== */
 
     const {
       data: existing,
       error: existingError,
-    } = await supabaseAdmin
-      .from('templates')
-      .select('id')
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .single();
+    } =
+      await supabaseAdmin
+        .from('templates')
+        .select('id')
+        .eq('id', id)
+        .eq('user_id', user.id)
+        .single();
 
     if (
       existingError ||
@@ -459,11 +687,13 @@ export async function DELETE(
       );
     }
 
-    /* -----------------------------------------------------
+    /* =====================================================
        DELETE
-    ----------------------------------------------------- */
+    ===================================================== */
 
-    const { error } =
+    const {
+      error,
+    } =
       await supabaseAdmin
         .from('templates')
         .delete()

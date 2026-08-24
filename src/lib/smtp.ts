@@ -12,30 +12,73 @@ export function verifyEmailAssociation(
   recipientEmail: string,
   pdfPath: string
 ): boolean {
-  if (!student.email || !recipientEmail) {
+  if (!student) {
+    console.error(
+      'Email association failed: student is missing.'
+    );
     return false;
   }
 
-  // Recipient must exactly match the student email.
-  const matchEmail =
-    student.email.trim().toLowerCase() ===
+  if (!student.email) {
+    console.error(
+      'Email association failed: student email is missing.',
+      {
+        studentId: student.id,
+        studentName: student.name,
+      }
+    );
+    return false;
+  }
+
+  if (!recipientEmail) {
+    console.error(
+      'Email association failed: recipient email is missing.'
+    );
+    return false;
+  }
+
+  /*
+   * IMPORTANT:
+   * The recipient must belong to the student.
+   */
+  const studentEmail =
+    student.email.trim().toLowerCase();
+
+  const targetEmail =
     recipientEmail.trim().toLowerCase();
 
-  if (!matchEmail) {
+  if (studentEmail !== targetEmail) {
+    console.error(
+      'Email association failed: recipient does not match student.',
+      {
+        studentId: student.id,
+        studentEmail,
+        targetEmail,
+      }
+    );
+
     return false;
   }
 
-  // pdfPath is now a Supabase Storage path.
-  // Example:
-  // userId/campaignId/Student_Name_CERT-2026-00001.pdf
+  /*
+   * Supabase Storage paths can use UUIDs or other
+   * generated filenames. Therefore we must NOT
+   * require the PDF filename to contain certId.
+   *
+   * We only require a valid storage path here.
+   */
+  if (!pdfPath || !pdfPath.trim()) {
+    console.error(
+      'Email association failed: certificate storage path is missing.',
+      {
+        studentId: student.id,
+      }
+    );
 
-  const fileName = path.basename(pdfPath);
+    return false;
+  }
 
-  const matchCertId =
-    !!student.certId &&
-    fileName.includes(student.certId);
-
-  return matchCertId;
+  return true;
 }
 
 /* --------------------------------------------------
@@ -45,10 +88,7 @@ export function verifyEmailAssociation(
 async function downloadCertificate(
   pdfPath: string
 ): Promise<Buffer> {
-  if (
-    !pdfPath ||
-    !pdfPath.trim()
-  ) {
+  if (!pdfPath || !pdfPath.trim()) {
     throw new Error(
       'Certificate storage path is missing.'
     );
@@ -57,17 +97,11 @@ async function downloadCertificate(
   const {
     data,
     error,
-  } =
-    await supabaseAdmin.storage
-      .from('certificates')
-      .download(
-        pdfPath
-      );
+  } = await supabaseAdmin.storage
+    .from('certificates')
+    .download(pdfPath);
 
-  if (
-    error ||
-    !data
-  ) {
+  if (error || !data) {
     console.error(
       'Supabase certificate download error:',
       error
@@ -98,10 +132,9 @@ export async function sendEmail(
   body: string,
   pdfPath: string
 ): Promise<string> {
-
   /* -----------------------------------------------
      1. SECURITY VALIDATION
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   if (
     !verifyEmailAssociation(
@@ -117,7 +150,7 @@ export async function sendEmail(
 
   /* -----------------------------------------------
      2. DOWNLOAD PDF FROM SUPABASE STORAGE
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   const pdfBuffer =
     await downloadCertificate(
@@ -126,7 +159,7 @@ export async function sendEmail(
 
   /* -----------------------------------------------
      3. LOAD SMTP SETTINGS
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   const settings =
     await JsonDb.findOne<Settings>(
@@ -145,9 +178,7 @@ export async function sendEmail(
     );
   }
 
-  if (
-    !settings.smtpFromEmail
-  ) {
+  if (!settings.smtpFromEmail) {
     throw new Error(
       'Sender email address is not configured. Go to Settings and enter your Gmail address.'
     );
@@ -155,11 +186,10 @@ export async function sendEmail(
 
   /* -----------------------------------------------
      4. SMTP CONFIGURATION
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   const port =
-    Number(settings.smtpPort) ||
-    587;
+    Number(settings.smtpPort) || 587;
 
   const secure =
     port === 465;
@@ -169,8 +199,7 @@ export async function sendEmail(
 
   const transporter =
     nodemailer.createTransport({
-      host:
-        settings.smtpHost,
+      host: settings.smtpHost,
 
       port,
 
@@ -183,31 +212,24 @@ export async function sendEmail(
         : {}),
 
       auth: {
-        user:
-          settings.smtpUser,
-
-        pass:
-          settings.smtpPass,
+        user: settings.smtpUser,
+        pass: settings.smtpPass,
       },
 
       tls: {
-        minVersion:
-          'TLSv1.2',
+        minVersion: 'TLSv1.2',
       },
 
-      connectionTimeout:
-        30000,
+      connectionTimeout: 30000,
 
-      greetingTimeout:
-        30000,
+      greetingTimeout: 30000,
 
-      socketTimeout:
-        60000,
+      socketTimeout: 60000,
     });
 
   /* -----------------------------------------------
      5. VERIFY SMTP CONNECTION
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   try {
     await transporter.verify();
@@ -226,13 +248,11 @@ export async function sendEmail(
   }
 
   /* -----------------------------------------------
-     6. CREATE ATTACHMENT
-  ----------------------------------------------- */
+     6. CREATE EMAIL ATTACHMENT
+  ------------------------------------------------ */
 
   const fileName =
-    path.basename(
-      pdfPath
-    );
+    path.basename(pdfPath);
 
   const mailOptions = {
     from:
@@ -263,7 +283,7 @@ export async function sendEmail(
 
   /* -----------------------------------------------
      7. SEND EMAIL
-  ----------------------------------------------- */
+  ------------------------------------------------ */
 
   try {
     const info =
@@ -276,6 +296,12 @@ export async function sendEmail(
       {
         messageId:
           info.messageId,
+
+        studentId:
+          student.id,
+
+        studentName:
+          student.name,
 
         certificate:
           student.certId,

@@ -127,6 +127,10 @@ export default function TemplatesPage() {
   const [fileMimeType, setFileMimeType] =
     useState('');
 
+  /* =====================================================
+     LOAD TEMPLATES
+  ===================================================== */
+
   const loadTemplates = async () => {
     setLoading(true);
 
@@ -160,11 +164,15 @@ export default function TemplatesPage() {
     loadTemplates();
   }, []);
 
+  /* =====================================================
+     OPEN EDITOR
+  ===================================================== */
+
   const openEditor = (template: Template) => {
     setEditingTemplate(template);
 
     setBodyText(
-      template.certificateBody ||
+      template.certificateBody?.trim() ||
         DEFAULT_BODY
     );
 
@@ -172,9 +180,7 @@ export default function TemplatesPage() {
       template.elements?.find(
         (element: any) =>
           element.type === 'text' &&
-          (
-            element.text || ''
-          ).includes(
+          (element.text || '').includes(
             '{{internship_role}}'
           )
       );
@@ -185,15 +191,19 @@ export default function TemplatesPage() {
     );
 
     setEmailSubject(
-  (template as any).emailSubject || ''
-);
+      (template as any).emailSubject || ''
+    );
 
-setEmailBody(
-  (template as any).emailBody || ''
-);
+    setEmailBody(
+      (template as any).emailBody || ''
+    );
 
     setActiveTab('design');
   };
+
+  /* =====================================================
+     FILE UPLOAD
+  ===================================================== */
 
   const handleFileUpload = (
     e: React.ChangeEvent<HTMLInputElement>
@@ -204,8 +214,7 @@ setEmailBody(
 
     if (file.size > 8 * 1024 * 1024) {
       setToast({
-        message:
-          'File size must not exceed 8MB.',
+        message: 'File size must not exceed 8MB.',
         type: 'error',
       });
 
@@ -224,6 +233,10 @@ setEmailBody(
 
     reader.readAsDataURL(file);
   };
+
+  /* =====================================================
+     DEFAULT CANVAS ELEMENTS
+  ===================================================== */
 
   const createDefaultElements =
     (): CanvasElement[] => [
@@ -277,7 +290,35 @@ setEmailBody(
         autoFit: true,
         minFontSize: 14,
       } as any,
+
+      /* ================================================
+         CERTIFICATE BODY
+         This element is required by pdf.ts
+      ================================================= */
+
+      {
+        id: 'certificate_body',
+        type: 'text',
+        x: 121,
+        y: 370,
+        width: 600,
+        height: 140,
+        text: '{{certificate_body}}',
+        fontSize: 16,
+        fontFamily: 'Helvetica',
+        fontWeight: 'normal',
+        color: '#000000',
+        align: 'center',
+        lineHeight: 1.35,
+        zIndex: 5,
+        autoFit: true,
+        minFontSize: 10,
+      } as any,
     ];
+
+  /* =====================================================
+     CREATE TEMPLATE
+  ===================================================== */
 
   const handleCreateSubmit = async (
     e: React.FormEvent
@@ -286,8 +327,7 @@ setEmailBody(
 
     if (!newTemplateName.trim()) {
       setToast({
-        message:
-          'Template name is required.',
+        message: 'Template name is required.',
         type: 'error',
       });
 
@@ -307,13 +347,18 @@ setEmailBody(
       return;
     }
 
-    let initialElements: CanvasElement[] =
-      [];
+    let initialElements: CanvasElement[] = [];
 
     let bg = '';
 
     if (newTemplateType === 'upload') {
       bg = uploadedFileBase64;
+
+      /*
+       * Even uploaded templates need the body element.
+       */
+      initialElements =
+        createDefaultElements();
     } else {
       bg =
         'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="842" height="595"><rect width="842" height="595" fill="%231a243d"/><rect x="20" y="20" width="802" height="555" fill="none" stroke="%236366f1" stroke-width="4"/></svg>';
@@ -327,6 +372,7 @@ setEmailBody(
         '/api/templates',
         {
           method: 'POST',
+
           headers: {
             'Content-Type':
               'application/json',
@@ -336,15 +382,18 @@ setEmailBody(
             name:
               newTemplateName.trim(),
 
-            type: newTemplateType,
+            type:
+              newTemplateType,
 
-            backgroundImage: bg,
+            backgroundImage:
+              bg,
 
             width: 842,
 
             height: 595,
 
-            elements: initialElements,
+            elements:
+              initialElements,
 
             certificateBody:
               DEFAULT_BODY,
@@ -389,6 +438,10 @@ setEmailBody(
       });
     }
   };
+
+  /* =====================================================
+     GENERIC TEMPLATE UPDATE
+  ===================================================== */
 
   const updateTemplateContent =
     async (
@@ -449,12 +502,135 @@ setEmailBody(
       }
     };
 
+  /* =====================================================
+     CERTIFICATE BODY ELEMENT
+  ===================================================== */
+
+  const createCertificateBodyElement = (
+    existing?: any
+  ): any => {
+    return {
+      id: 'certificate_body',
+      type: 'text',
+
+      /*
+       * Preserve user's existing position/
+       * formatting when available.
+       */
+      x:
+        typeof existing?.x === 'number'
+          ? existing.x
+          : 121,
+
+      y:
+        typeof existing?.y === 'number'
+          ? existing.y
+          : 370,
+
+      width:
+        typeof existing?.width === 'number'
+          ? existing.width
+          : 600,
+
+      height:
+        typeof existing?.height === 'number'
+          ? existing.height
+          : 140,
+
+      text: '{{certificate_body}}',
+
+      fontSize:
+        typeof existing?.fontSize === 'number'
+          ? existing.fontSize
+          : 16,
+
+      fontFamily:
+        existing?.fontFamily ||
+        'Helvetica',
+
+      fontWeight:
+        existing?.fontWeight ||
+        'normal',
+
+      fontStyle:
+        existing?.fontStyle ||
+        'normal',
+
+      color:
+        existing?.color ||
+        '#000000',
+
+      align:
+        existing?.align ||
+        'center',
+
+      lineHeight:
+        typeof existing?.lineHeight === 'number'
+          ? existing.lineHeight
+          : 1.35,
+
+      zIndex:
+        typeof existing?.zIndex === 'number'
+          ? existing.zIndex
+          : 5,
+
+      autoFit: true,
+
+      minFontSize:
+        typeof existing?.minFontSize === 'number'
+          ? existing.minFontSize
+          : 10,
+    };
+  };
+
+  /* =====================================================
+     SAVE CERTIFICATE BODY
+  ===================================================== */
+
   const handleSaveBody = async () => {
+    if (!editingTemplate) return;
+
+    const elements = [
+      ...(editingTemplate.elements || []),
+    ];
+
+    const bodyIndex =
+      elements.findIndex(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      );
+
+    const existingBody =
+      bodyIndex >= 0
+        ? elements[bodyIndex]
+        : undefined;
+
+    const bodyElement =
+      createCertificateBodyElement(
+        existingBody
+      );
+
+    if (bodyIndex >= 0) {
+      elements[bodyIndex] =
+        bodyElement;
+    } else {
+      elements.push(
+        bodyElement
+      );
+    }
+
     await updateTemplateContent({
       certificateBody:
         bodyText.trim(),
+
+      elements,
     });
   };
+
+  /* =====================================================
+     SAVE ROLE
+  ===================================================== */
 
   const handleSaveRole = async () => {
     if (!editingTemplate) return;
@@ -466,9 +642,7 @@ setEmailBody(
       elements.findIndex(
         (element: any) =>
           element.type === 'text' &&
-          (
-            element.text || ''
-          ).includes(
+          (element.text || '').includes(
             '{{internship_role}}'
           )
       );
@@ -537,6 +711,10 @@ setEmailBody(
     });
   };
 
+  /* =====================================================
+     SAVE EMAIL
+  ===================================================== */
+
   const handleSaveEmail = async () => {
     await updateTemplateContent({
       emailSubject:
@@ -547,12 +725,70 @@ setEmailBody(
     });
   };
 
+  /* =====================================================
+     SAVE CANVAS
+  ===================================================== */
+
   const handleSaveCanvas = async (
     elements: CanvasElement[],
     width: number,
     height: number
   ) => {
     if (!editingTemplate) return;
+
+    /*
+     * Make sure the certificate body element
+     * can never accidentally disappear when
+     * Design tab saves the canvas.
+     */
+    const currentBodyElement =
+      editingTemplate.elements?.find(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      ) as any;
+
+    const incomingBodyElement =
+      elements.find(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      ) as any;
+
+    let finalElements = [
+      ...elements,
+    ];
+
+    /*
+     * If CanvasEditor did not return the
+     * certificate body element, preserve it.
+     */
+    if (
+      !incomingBodyElement &&
+      currentBodyElement
+    ) {
+      finalElements.push(
+        createCertificateBodyElement(
+          currentBodyElement
+        )
+      );
+    }
+
+    /*
+     * If there is no body element at all,
+     * create one.
+     */
+    if (
+      !finalElements.some(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      )
+    ) {
+      finalElements.push(
+        createCertificateBodyElement()
+      );
+    }
 
     try {
       const res = await fetch(
@@ -566,9 +802,22 @@ setEmailBody(
           },
 
           body: JSON.stringify({
-            elements,
+            elements:
+              finalElements,
+
             width,
+
             height,
+
+            /*
+             * IMPORTANT:
+             * Preserve certificate body
+             * during Design saves.
+             */
+            certificateBody:
+              editingTemplate.certificateBody ||
+              bodyText ||
+              DEFAULT_BODY,
           }),
         }
       );
@@ -605,19 +854,56 @@ setEmailBody(
     }
   };
 
+  /* =====================================================
+     INSERT FIELD INTO BODY
+  ===================================================== */
+
   const insertField = (
     field: string
   ) => {
     setBodyText(
-      (current) =>
-        `${current} {{${field}}}`
+      (current) => {
+        const separator =
+          current &&
+          !current.endsWith(' ')
+            ? ' '
+            : '';
+
+        return `${current}${separator}{{${field}}}`;
+      }
     );
+
+    setActiveTab('body');
   };
+
+  /* =====================================================
+     DUPLICATE TEMPLATE
+  ===================================================== */
 
   const handleDuplicate = async (
     tpl: Template
   ) => {
     try {
+      /*
+       * Make sure duplicate also has
+       * certificate body element.
+       */
+      const elements = [
+        ...(tpl.elements || []),
+      ];
+
+      if (
+        !elements.some(
+          (element: any) =>
+            element.id ===
+            'certificate_body'
+        )
+      ) {
+        elements.push(
+          createCertificateBodyElement()
+        );
+      }
+
       const res = await fetch(
         '/api/templates',
         {
@@ -644,8 +930,7 @@ setEmailBody(
             height:
               tpl.height,
 
-            elements:
-              tpl.elements,
+            elements,
 
             certificateBody:
               tpl.certificateBody ||
@@ -679,6 +964,10 @@ setEmailBody(
       });
     }
   };
+
+  /* =====================================================
+     DELETE TEMPLATE
+  ===================================================== */
 
   const handleDelete = async (
     id: string
@@ -725,24 +1014,37 @@ setEmailBody(
     }
   };
 
+  /* =====================================================
+     CURRENT ROLE ELEMENT
+  ===================================================== */
+
   const currentRoleElement =
     useMemo(() => {
       return editingTemplate?.elements?.find(
         (element: any) =>
           element.type === 'text' &&
-          (
-            element.text || ''
-          ).includes(
+          (element.text || '').includes(
             '{{internship_role}}'
           )
       ) as any;
     }, [editingTemplate]);
 
-  /*
-   * ---------------------------------------------------
-   * EDITOR
-   * ---------------------------------------------------
-   */
+  /* =====================================================
+     CURRENT BODY ELEMENT
+  ===================================================== */
+
+  const currentBodyElement =
+    useMemo(() => {
+      return editingTemplate?.elements?.find(
+        (element: any) =>
+          element.id ===
+          'certificate_body'
+      ) as any;
+    }, [editingTemplate]);
+
+  /* =====================================================
+     EDITOR
+  ===================================================== */
 
   if (editingTemplate) {
     return (
@@ -1127,6 +1429,43 @@ setEmailBody(
                     'inherit',
                 }}
               />
+
+              {/* BODY STATUS */}
+
+              <div
+                style={{
+                  marginTop:
+                    '12px',
+
+                  padding:
+                    '11px 14px',
+
+                  borderRadius:
+                    '9px',
+
+                  background:
+                    currentBodyElement
+                      ? 'rgba(34,197,94,.07)'
+                      : 'rgba(245,158,11,.08)',
+
+                  border:
+                    currentBodyElement
+                      ? '1px solid rgba(34,197,94,.15)'
+                      : '1px solid rgba(245,158,11,.16)',
+
+                  color:
+                    currentBodyElement
+                      ? '#86efac'
+                      : '#fbbf24',
+
+                  fontSize:
+                    '12px',
+                }}
+              >
+                {currentBodyElement
+                  ? '✓ Certificate body area is connected to the certificate design.'
+                  : '⚠ The certificate body area will be created when you save.'}
+              </div>
 
               <div
                 style={{
@@ -1756,11 +2095,9 @@ setEmailBody(
     );
   }
 
-  /*
-   * ---------------------------------------------------
-   * TEMPLATE LIBRARY
-   * ---------------------------------------------------
-   */
+  /* =====================================================
+     TEMPLATE LIBRARY
+  ===================================================== */
 
   return (
     <DashboardLayout
@@ -2164,7 +2501,9 @@ setEmailBody(
         </div>
       )}
 
-      {/* CREATE MODAL */}
+      {/* =================================================
+          CREATE MODAL
+      ================================================= */}
 
       {isCreating && (
         <div
@@ -2486,9 +2825,9 @@ setEmailBody(
   );
 }
 
-/* --------------------------------------------------
-   SMALL COMPONENTS
--------------------------------------------------- */
+/* =====================================================
+   FIELD PANEL
+===================================================== */
 
 function FieldPanel({
   onInsert,
@@ -2618,6 +2957,10 @@ function FieldPanel({
   );
 }
 
+/* =====================================================
+   INFO BOX
+===================================================== */
+
 function InfoBox({
   label,
   value,
@@ -2667,6 +3010,10 @@ function InfoBox({
     </div>
   );
 }
+
+/* =====================================================
+   INPUT STYLE
+===================================================== */
 
 const inputStyle: React.CSSProperties = {
   width:

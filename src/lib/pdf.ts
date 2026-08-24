@@ -11,16 +11,26 @@ import {
 
 import { supabaseAdmin } from './supabase-admin';
 
-/* --------------------------------------------------
+/* =========================================================
    COLORS
--------------------------------------------------- */
+========================================================= */
 
 export function parseColor(hex?: string) {
   if (!hex) {
     return rgb(0, 0, 0);
   }
 
-  const cleanHex = hex.replace('#', '');
+  let cleanHex = String(hex)
+    .replace('#', '')
+    .trim();
+
+  // Support short HEX: #fff
+  if (cleanHex.length === 3) {
+    cleanHex = cleanHex
+      .split('')
+      .map((char) => char + char)
+      .join('');
+  }
 
   const r =
     parseInt(cleanHex.substring(0, 2), 16) / 255;
@@ -32,15 +42,26 @@ export function parseColor(hex?: string) {
     parseInt(cleanHex.substring(4, 6), 16) / 255;
 
   return rgb(
-    isNaN(r) ? 0 : r,
-    isNaN(g) ? 0 : g,
-    isNaN(b) ? 0 : b
+    Number.isNaN(r) ? 0 : r,
+    Number.isNaN(g) ? 0 : g,
+    Number.isNaN(b) ? 0 : b
   );
 }
 
-/* --------------------------------------------------
+/* =========================================================
+   REGEX ESCAPE
+========================================================= */
+
+function escapeRegExp(value: string) {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    '\\$&'
+  );
+}
+
+/* =========================================================
    WORD WRAPPING
--------------------------------------------------- */
+========================================================= */
 
 export function wrapText(
   text: string,
@@ -48,26 +69,31 @@ export function wrapText(
   font: any,
   fontSize: number
 ): string[] {
-  const paragraphs = text.split(/\r?\n/);
+  const paragraphs =
+    String(text || '').split(/\r?\n/);
+
   const lines: string[] = [];
 
   for (const paragraph of paragraphs) {
-    const words = paragraph.split(/\s+/);
+    const trimmed =
+      paragraph.trim();
 
-    let currentLine = '';
-
-    if (
-      words.length === 1 &&
-      words[0] === ''
-    ) {
+    // Preserve blank lines
+    if (!trimmed) {
       lines.push('');
       continue;
     }
 
+    const words =
+      trimmed.split(/\s+/);
+
+    let currentLine = '';
+
     for (const word of words) {
-      const testLine = currentLine
-        ? `${currentLine} ${word}`
-        : word;
+      const testLine =
+        currentLine
+          ? `${currentLine} ${word}`
+          : word;
 
       const width =
         font.widthOfTextAtSize(
@@ -79,7 +105,10 @@ export function wrapText(
         width > maxWidth &&
         currentLine
       ) {
-        lines.push(currentLine);
+        lines.push(
+          currentLine
+        );
+
         currentLine = word;
       } else {
         currentLine = testLine;
@@ -87,69 +116,108 @@ export function wrapText(
     }
 
     if (currentLine) {
-      lines.push(currentLine);
+      lines.push(
+        currentLine
+      );
     }
   }
 
   return lines;
 }
 
-/* --------------------------------------------------
-   PLACEHOLDER DATA
--------------------------------------------------- */
+/* =========================================================
+   PLACEHOLDER REPLACEMENT
+========================================================= */
 
 export function replacePlaceholders(
   text: string,
   student: Student,
   mappings: Record<string, string>
 ): string {
-  const data: Record<string, string> = {
-    student_name: student.name || '',
-    email: student.email || '',
-    college_name: student.collegeName || '',
-    course: student.course || '',
-    department: student.department || '',
-    internship_role: student.role || '',
+  const data: Record<
+    string,
+    string
+  > = {
+    student_name:
+      student.name || '',
+
+    email:
+      student.email || '',
+
+    college_name:
+      student.collegeName || '',
+
+    course:
+      student.course || '',
+
+    department:
+      student.department || '',
+
+    internship_role:
+      student.role || '',
+
     organization_name:
       student.organizationName || '',
-    start_date: student.startDate || '',
-    end_date: student.endDate || '',
+
+    start_date:
+      student.startDate || '',
+
+    end_date:
+      student.endDate || '',
+
     certificate_date:
       student.certDate || '',
+
     certificate_id:
       student.certId || '',
+
     ...(student.customFields || {}),
   };
 
-  let replaced = text || '';
+  let replaced =
+    String(text || '');
 
-  Object.entries(data).forEach(
+  Object.entries(
+    data
+  ).forEach(
     ([key, value]) => {
-      const safeValue = value || '';
+      const safeValue =
+        String(value || '');
 
-      replaced = replaced.replace(
-        new RegExp(
-          `{{\\s*${escapeRegExp(
-            key
-          )}\\s*}}`,
-          'gi'
-        ),
-        safeValue
-      );
-
-      const mappedHeader =
-        mappings?.[key];
-
-      if (mappedHeader) {
-        replaced = replaced.replace(
+      /*
+       * Standard placeholder:
+       * {{student_name}}
+       */
+      replaced =
+        replaced.replace(
           new RegExp(
             `{{\\s*${escapeRegExp(
-              mappedHeader
+              key
             )}\\s*}}`,
             'gi'
           ),
           safeValue
         );
+
+      /*
+       * Excel mapped placeholder.
+       */
+      const mappedHeader =
+        mappings?.[key];
+
+      if (
+        mappedHeader
+      ) {
+        replaced =
+          replaced.replace(
+            new RegExp(
+              `{{\\s*${escapeRegExp(
+                mappedHeader
+              )}\\s*}}`,
+              'gi'
+            ),
+            safeValue
+          );
       }
     }
   );
@@ -157,18 +225,9 @@ export function replacePlaceholders(
   return replaced;
 }
 
-function escapeRegExp(
-  value: string
-) {
-  return value.replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&'
-  );
-}
-
-/* --------------------------------------------------
-   AUTO FIT
--------------------------------------------------- */
+/* =========================================================
+   AUTO FIT SINGLE LINE
+========================================================= */
 
 function getAutoFitFontSize(
   text: string,
@@ -177,7 +236,8 @@ function getAutoFitFontSize(
   minSize: number,
   maxWidth: number
 ) {
-  let size = requestedSize;
+  let size =
+    requestedSize;
 
   while (
     size > minSize &&
@@ -195,9 +255,309 @@ function getAutoFitFontSize(
   );
 }
 
-/* --------------------------------------------------
+/* =========================================================
+   AUTO FIT MULTI-LINE BODY
+========================================================= */
+
+function fitMultilineText(
+  text: string,
+  font: any,
+  requestedSize: number,
+  minSize: number,
+  maxWidth: number,
+  maxHeight: number,
+  lineHeightMultiplier: number
+) {
+  let fontSize =
+    requestedSize;
+
+  let lineHeight =
+    fontSize *
+    lineHeightMultiplier;
+
+  let lines =
+    wrapText(
+      text,
+      maxWidth,
+      font,
+      fontSize
+    );
+
+  while (
+    lines.length *
+      lineHeight >
+      maxHeight &&
+    fontSize >
+      minSize
+  ) {
+    fontSize -= 1;
+
+    lineHeight =
+      fontSize *
+      lineHeightMultiplier;
+
+    lines =
+      wrapText(
+        text,
+        maxWidth,
+        font,
+        fontSize
+      );
+  }
+
+  return {
+    fontSize,
+    lineHeight,
+    lines,
+  };
+}
+
+/* =========================================================
+   LOAD FONTS
+========================================================= */
+
+async function embedFonts(
+  doc: PDFDocument
+) {
+  return {
+    helvetica:
+      await doc.embedFont(
+        StandardFonts.Helvetica
+      ),
+
+    helveticaBold:
+      await doc.embedFont(
+        StandardFonts.HelveticaBold
+      ),
+
+    helveticaOblique:
+      await doc.embedFont(
+        StandardFonts.HelveticaOblique
+      ),
+
+    timesRoman:
+      await doc.embedFont(
+        StandardFonts.TimesRoman
+      ),
+
+    timesRomanBold:
+      await doc.embedFont(
+        StandardFonts.TimesRomanBold
+      ),
+
+    timesRomanItalic:
+      await doc.embedFont(
+        StandardFonts.TimesRomanItalic
+      ),
+
+    courier:
+      await doc.embedFont(
+        StandardFonts.Courier
+      ),
+
+    courierBold:
+      await doc.embedFont(
+        StandardFonts.CourierBold
+      ),
+  };
+}
+
+/* =========================================================
+   FONT SELECTOR
+========================================================= */
+
+function selectFont(
+  fonts: any,
+  family?: string,
+  weight?: string,
+  style?: string
+) {
+  const isBold =
+    weight === 'bold' ||
+    weight === '700' ||
+    Number(weight) >= 600;
+
+  const isItalic =
+    style === 'italic';
+
+  const familyName =
+    String(
+      family || ''
+    ).toLowerCase();
+
+  if (
+    familyName.includes(
+      'times'
+    ) ||
+    familyName.includes(
+      'serif'
+    )
+  ) {
+    if (
+      isBold
+    ) {
+      return fonts.timesRomanBold;
+    }
+
+    if (
+      isItalic
+    ) {
+      return fonts.timesRomanItalic;
+    }
+
+    return fonts.timesRoman;
+  }
+
+  if (
+    familyName.includes(
+      'courier'
+    ) ||
+    familyName.includes(
+      'mono'
+    )
+  ) {
+    return isBold
+      ? fonts.courierBold
+      : fonts.courier;
+  }
+
+  if (
+    isBold
+  ) {
+    return fonts.helveticaBold;
+  }
+
+  if (
+    isItalic
+  ) {
+    return fonts.helveticaOblique;
+  }
+
+  return fonts.helvetica;
+}
+
+/* =========================================================
+   DRAW MULTILINE TEXT
+========================================================= */
+
+function drawMultilineText(
+  page: any,
+  text: string,
+  options: {
+    x: number;
+    topY: number;
+    width: number;
+    height: number;
+    font: any;
+    fontSize: number;
+    lineHeight: number;
+    color: any;
+    align?: string;
+  }
+) {
+  const {
+    x,
+    topY,
+    width,
+    height,
+    font,
+    fontSize,
+    lineHeight,
+    color,
+    align,
+  } = options;
+
+  const lines =
+    wrapText(
+      text,
+      Math.max(
+        1,
+        width - 10
+      ),
+      font,
+      fontSize
+    );
+
+  const maxLines =
+    Math.max(
+      1,
+      Math.floor(
+        height /
+          lineHeight
+      )
+    );
+
+  const visibleLines =
+    lines.slice(
+      0,
+      maxLines
+    );
+
+  visibleLines.forEach(
+    (
+      line: string,
+      index: number
+    ) => {
+      if (
+        line === ''
+      ) {
+        return;
+      }
+
+      const lineWidth =
+        font.widthOfTextAtSize(
+          line,
+          fontSize
+        );
+
+      let drawX =
+        x + 5;
+
+      if (
+        align === 'center'
+      ) {
+        drawX =
+          x +
+          (width -
+            lineWidth) /
+            2;
+      } else if (
+        align === 'right'
+      ) {
+        drawX =
+          x +
+          width -
+          lineWidth -
+          5;
+      }
+
+      const lineY =
+        topY -
+        fontSize -
+        index *
+          lineHeight;
+
+      if (
+        lineY > 0
+      ) {
+        page.drawText(
+          line,
+          {
+            x: drawX,
+            y: lineY,
+            size: fontSize,
+            font,
+            color,
+          }
+        );
+      }
+    }
+  );
+}
+
+/* =========================================================
    PDF GENERATOR
--------------------------------------------------- */
+========================================================= */
 
 export async function generatePDF(
   template: Template,
@@ -206,64 +566,21 @@ export async function generatePDF(
 ): Promise<Uint8Array> {
   let pdfDoc: PDFDocument;
 
-  const embedFonts = async (
-    doc: PDFDocument
-  ) => {
-    return {
-      helvetica:
-        await doc.embedFont(
-          StandardFonts.Helvetica
-        ),
-
-      helveticaBold:
-        await doc.embedFont(
-          StandardFonts.HelveticaBold
-        ),
-
-      helveticaOblique:
-        await doc.embedFont(
-          StandardFonts.HelveticaOblique
-        ),
-
-      timesRoman:
-        await doc.embedFont(
-          StandardFonts.TimesRoman
-        ),
-
-      timesRomanBold:
-        await doc.embedFont(
-          StandardFonts.TimesRomanBold
-        ),
-
-      timesRomanItalic:
-        await doc.embedFont(
-          StandardFonts.TimesRomanItalic
-        ),
-
-      courier:
-        await doc.embedFont(
-          StandardFonts.Courier
-        ),
-
-      courierBold:
-        await doc.embedFont(
-          StandardFonts.CourierBold
-        ),
-    };
-  };
-
-  /* ------------------------------------------------
-     BACKGROUND
-  ------------------------------------------------ */
+  /* =====================================================
+     CREATE PDF / BACKGROUND
+  ===================================================== */
 
   if (
-    template.type === 'upload' &&
+    template.type ===
+      'upload' &&
     template.backgroundImage?.startsWith(
       'data:application/pdf;base64,'
     )
   ) {
     const pdfBase64 =
-      template.backgroundImage.split(',')[1];
+      template.backgroundImage.split(
+        ','
+      )[1];
 
     const pdfBytes =
       Buffer.from(
@@ -279,24 +596,28 @@ export async function generatePDF(
     pdfDoc =
       await PDFDocument.create();
 
-    const [copiedPage] =
+    const copiedPages =
       await pdfDoc.copyPages(
         templateDoc,
         [0]
       );
 
     pdfDoc.addPage(
-      copiedPage
+      copiedPages[0]
     );
   } else {
     pdfDoc =
       await PDFDocument.create();
 
     const width =
-      template.width || 842;
+      Number(
+        template.width || 842
+      );
 
     const height =
-      template.height || 595;
+      Number(
+        template.height || 595
+      );
 
     const page =
       pdfDoc.addPage([
@@ -304,6 +625,9 @@ export async function generatePDF(
         height,
       ]);
 
+    /*
+     * Draw uploaded image background.
+     */
     if (
       template.backgroundImage &&
       !template.backgroundImage.startsWith(
@@ -312,44 +636,67 @@ export async function generatePDF(
     ) {
       try {
         const parts =
-          template.backgroundImage.split(',');
-
-        const mime =
-          parts[0]
-            .match(/:(.*?);/)?.[1] || '';
-
-        const imgBytes =
-          Buffer.from(
-            parts[1],
-            'base64'
+          template.backgroundImage.split(
+            ','
           );
 
-        let image;
-
         if (
-          mime.includes('png')
+          parts.length >= 2
         ) {
-          image =
-            await pdfDoc.embedPng(
-              imgBytes
-            );
-        } else {
-          image =
-            await pdfDoc.embedJpg(
-              imgBytes
-            );
-        }
+          const mime =
+            parts[0]
+              .match(
+                /:(.*?);/
+              )?.[1] || '';
 
-        page.drawImage(
-          image,
-          {
-            x: 0,
-            y: 0,
-            width,
-            height,
+          const imgBytes =
+            Buffer.from(
+              parts[1],
+              'base64'
+            );
+
+          let image;
+
+          if (
+            mime.includes(
+              'png'
+            )
+          ) {
+            image =
+              await pdfDoc.embedPng(
+                imgBytes
+              );
+          } else if (
+            mime.includes(
+              'jpeg'
+            ) ||
+            mime.includes(
+              'jpg'
+            )
+          ) {
+            image =
+              await pdfDoc.embedJpg(
+                imgBytes
+              );
           }
-        );
-      } catch (error) {
+
+          if (
+            image
+          ) {
+            page.drawImage(
+              image,
+              {
+                x: 0,
+                y: 0,
+                width,
+                height,
+              }
+            );
+          }
+        }
+      } catch (
+        error
+      ) {
         console.error(
           'Background image error:',
           error
@@ -372,159 +719,360 @@ export async function generatePDF(
       pdfDoc
     );
 
-  /* ------------------------------------------------
-     FONT SELECTION
-  ------------------------------------------------ */
+  const designWidth =
+    Number(
+      template.width || 842
+    );
 
-  const getFont = (
-    family?: string,
-    weight?: string,
-    style?: string
-  ) => {
-    const isBold =
-      weight === 'bold' ||
-      weight === '700';
+  const designHeight =
+    Number(
+      template.height || 595
+    );
 
-    const isItalic =
-      style === 'italic';
+  const scaleX =
+    pdfWidth /
+    designWidth;
 
-    const familyName =
-      family?.toLowerCase() || '';
+  const scaleY =
+    pdfHeight /
+    designHeight;
 
-    if (
-      familyName.includes('times') ||
-      familyName.includes('serif')
-    ) {
-      if (isBold) {
-        return fonts.timesRomanBold;
-      }
+  const uniformScale =
+    Math.min(
+      scaleX,
+      scaleY
+    );
 
-      if (isItalic) {
-        return fonts.timesRomanItalic;
-      }
-
-      return fonts.timesRoman;
-    }
-
-    if (
-      familyName.includes('courier') ||
-      familyName.includes('mono')
-    ) {
-      return isBold
-        ? fonts.courierBold
-        : fonts.courier;
-    }
-
-    if (isBold) {
-      return fonts.helveticaBold;
-    }
-
-    if (isItalic) {
-      return fonts.helveticaOblique;
-    }
-
-    return fonts.helvetica;
-  };
-
-  /* ------------------------------------------------
+  /* =====================================================
      CERTIFICATE BODY
-  ------------------------------------------------ */
+     
+     IMPORTANT:
+     The body is stored in:
+       template.certificateBody
+
+     The position/style is stored in:
+       certificate_body element
+  ===================================================== */
 
   const certificateBody =
-    (template as any)
-      .certificateBody;
+    String(
+      (template as any)
+        .certificateBody ||
+        ''
+    ).trim();
 
+  const bodyElement =
+    (
+      template.elements ||
+      []
+    ).find(
+      (element: any) =>
+        element.id ===
+          'certificate_body' ||
+        element.id ===
+          'certificateBody'
+    ) as any;
+
+  /*
+   * Render certificate body when it exists.
+   */
   if (
-    certificateBody &&
-    certificateBody.trim()
+    certificateBody
   ) {
     const bodyText =
       replacePlaceholders(
         certificateBody,
         student,
         mappings
+      ).trim();
+
+    /*
+     * If body element doesn't exist,
+     * use a safe default area.
+     *
+     * This makes old templates work too.
+     */
+    const element =
+      bodyElement || {
+        x: 121,
+        y: 370,
+        width: 600,
+        height: 140,
+        fontSize: 16,
+        fontFamily:
+          'Helvetica',
+        fontWeight:
+          'normal',
+        fontStyle:
+          'normal',
+        color:
+          '#000000',
+        align:
+          'center',
+        lineHeight:
+          1.35,
+        minFontSize:
+          10,
+      };
+
+    const x =
+      Number(
+        element.x ?? 121
+      ) * scaleX;
+
+    const topY =
+      pdfHeight -
+      Number(
+        element.y ?? 370
+      ) * scaleY;
+
+    const width =
+      Number(
+        element.width ?? 600
+      ) * scaleX;
+
+    const height =
+      Number(
+        element.height ?? 140
+      ) * scaleY;
+
+    const requestedFontSize =
+      Number(
+        element.fontSize ?? 16
+      ) * uniformScale;
+
+    const minFontSize =
+      Number(
+        element.minFontSize ??
+          10
+      ) * uniformScale;
+
+    const lineHeightMultiplier =
+      Number(
+        element.lineHeight ??
+          1.35
       );
 
-    const bodyElement =
+    const font =
+      selectFont(
+        fonts,
+        element.fontFamily,
+        element.fontWeight,
+        element.fontStyle
+      );
+
+    const fitted =
+      fitMultilineText(
+        bodyText,
+        font,
+        requestedFontSize,
+        minFontSize,
+        Math.max(
+          1,
+          width - 10
+        ),
+        height,
+        lineHeightMultiplier
+      );
+
+    drawMultilineText(
+      page,
+      bodyText,
+      {
+        x,
+        topY,
+        width,
+        height,
+        font,
+        fontSize:
+          fitted.fontSize,
+        lineHeight:
+          fitted.lineHeight,
+        color:
+          parseColor(
+            element.color ||
+              '#000000'
+          ),
+        align:
+          element.align ||
+          'center',
+      }
+    );
+  }
+
+  /* =====================================================
+     VISUAL CANVAS ELEMENTS
+  ===================================================== */
+
+  const elements =
+    [
+      ...(template.elements ||
+        []),
+    ].sort(
       (
-        template.elements ||
-        []
-      ).find(
-        (element: any) =>
-          element.id ===
-          'certificate_body'
-      ) as any;
+        a: any,
+        b: any
+      ) =>
+        Number(
+          a.zIndex || 0
+        ) -
+        Number(
+          b.zIndex || 0
+        )
+    );
 
-    if (bodyElement) {
-      const designWidth =
-        template.width || 842;
+  for (
+    const element of elements
+  ) {
+    /*
+     * Certificate body has already
+     * been rendered above.
+     */
+    if (
+      element.id ===
+        'certificate_body' ||
+      element.id ===
+        'certificateBody'
+    ) {
+      continue;
+    }
 
-      const designHeight =
-        template.height || 595;
+    /* ===================================================
+       TEXT ELEMENT
+    =================================================== */
 
-      const scaleX =
-        pdfWidth / designWidth;
+    if (
+      element.type ===
+      'text'
+    ) {
+      const rawText =
+        String(
+          element.text ||
+            ''
+        );
 
-      const scaleY =
-        pdfHeight / designHeight;
+      /*
+       * Allow a body element using
+       * {{certificate_body}} too.
+       */
+      const bodyPlaceholder =
+        rawText.replace(
+          /{{\s*certificate_body\s*}}/gi,
+          certificateBody
+        );
+
+      const textContent =
+        replacePlaceholders(
+          bodyPlaceholder,
+          student,
+          mappings
+        );
+
+      if (
+        !textContent.trim()
+      ) {
+        continue;
+      }
 
       const x =
-        bodyElement.x * scaleX;
+        Number(
+          element.x || 0
+        ) * scaleX;
 
       const topY =
-        bodyElement.y * scaleY;
+        pdfHeight -
+        Number(
+          element.y || 0
+        ) * scaleY;
 
       const width =
-        (bodyElement.width || 600) *
-        scaleX;
+        Number(
+          element.width ||
+            200
+        ) * scaleX;
 
       const height =
-        (bodyElement.height || 180) *
-        scaleY;
+        Number(
+          element.height ||
+            40
+        ) * scaleY;
 
       const font =
-        getFont(
-          bodyElement.fontFamily,
-          bodyElement.fontWeight,
-          bodyElement.fontStyle
+        selectFont(
+          fonts,
+          element.fontFamily,
+          element.fontWeight,
+          element.fontStyle
         );
 
-      let fontSize =
-        (bodyElement.fontSize || 16) *
-        Math.min(
-          scaleX,
-          scaleY
-        );
+      const requestedFontSize =
+        Number(
+          element.fontSize ||
+            14
+        ) * uniformScale;
 
       const minFontSize =
-        bodyElement.minFontSize ||
-        10;
+        Number(
+          (element as any)
+            .minFontSize ||
+            8
+        ) * uniformScale;
 
-      let lines =
-        wrapText(
-          bodyText,
-          width - 10,
-          font,
-          fontSize
+      let fontSize =
+        requestedFontSize;
+
+      /*
+       * Auto-fit long names and roles.
+       */
+      if (
+        (element as any)
+          .autoFit === true &&
+        !textContent.includes(
+          '\n'
+        )
+      ) {
+        fontSize =
+          getAutoFitFontSize(
+            textContent,
+            font,
+            requestedFontSize,
+            minFontSize,
+            Math.max(
+              1,
+              width - 8
+            )
+          );
+      }
+
+      const lineHeightMultiplier =
+        Number(
+          element.lineHeight ||
+            1.2
         );
 
       let lineHeight =
         fontSize *
-        (bodyElement.lineHeight ||
-          1.35);
+        lineHeightMultiplier;
 
-      const maxLines =
-        Math.max(
-          1,
-          Math.floor(
-            height /
-              lineHeight
-          )
+      let lines =
+        wrapText(
+          textContent,
+          Math.max(
+            1,
+            width - 8
+          ),
+          font,
+          fontSize
         );
 
+      /*
+       * Reduce font until the text
+       * fits vertically.
+       */
       while (
-        lines.length >
-          maxLines &&
+        lines.length *
+          lineHeight >
+          height &&
         fontSize >
           minFontSize
       ) {
@@ -532,195 +1080,17 @@ export async function generatePDF(
 
         lineHeight =
           fontSize *
-          (bodyElement.lineHeight ||
-            1.35);
+          lineHeightMultiplier;
 
         lines =
           wrapText(
-            bodyText,
-            width - 10,
+            textContent,
+            Math.max(
+              1,
+              width - 8
+            ),
             font,
             fontSize
-          );
-      }
-
-      const drawTop =
-        pdfHeight -
-        topY;
-
-      lines
-        .slice(0, maxLines)
-        .forEach(
-          (
-            line,
-            index
-          ) => {
-            const lineWidth =
-              font.widthOfTextAtSize(
-                line,
-                fontSize
-              );
-
-            let drawX =
-              x + 5;
-
-            if (
-              bodyElement.align ===
-              'center'
-            ) {
-              drawX =
-                x +
-                (width -
-                  lineWidth) /
-                  2;
-            } else if (
-              bodyElement.align ===
-              'right'
-            ) {
-              drawX =
-                x +
-                width -
-                lineWidth -
-                5;
-            }
-
-            const lineY =
-              drawTop -
-              fontSize -
-              index *
-                lineHeight;
-
-            if (
-              lineY > 0 &&
-              lineY < pdfHeight
-            ) {
-              page.drawText(
-                line,
-                {
-                  x: drawX,
-                  y: lineY,
-                  size: fontSize,
-                  font,
-                  color:
-                    parseColor(
-                      bodyElement.color ||
-                        '#000000'
-                    ),
-                }
-              );
-            }
-          }
-        );
-    }
-  }
-
-  /* ------------------------------------------------
-     VISUAL ELEMENTS
-  ------------------------------------------------ */
-
-  const elements =
-    [
-      ...(template.elements || []),
-    ].sort(
-      (
-        a: any,
-        b: any
-      ) =>
-        (a.zIndex || 0) -
-        (b.zIndex || 0)
-    );
-
-  for (
-    const element of elements
-  ) {
-    /*
-     * Certificate body is already
-     * rendered above.
-     */
-    if (
-      element.id ===
-      'certificate_body'
-    ) {
-      continue;
-    }
-
-    const designWidth =
-      template.width || 842;
-
-    const designHeight =
-      template.height || 595;
-
-    const scaleX =
-      pdfWidth / designWidth;
-
-    const scaleY =
-      pdfHeight / designHeight;
-
-    const elX =
-      element.x * scaleX;
-
-    const elY =
-      pdfHeight -
-      element.y * scaleY;
-
-    const elWidth =
-      (element.width || 200) *
-      scaleX;
-
-    const elHeight =
-      (element.height || 40) *
-      scaleY;
-
-    /* ----------------------------------------------
-       TEXT
-    ---------------------------------------------- */
-
-    if (
-      element.type === 'text'
-    ) {
-      const textRaw =
-        element.text || '';
-
-      const textContent =
-        replacePlaceholders(
-          textRaw,
-          student,
-          mappings
-        );
-
-      const font =
-        getFont(
-          element.fontFamily,
-          element.fontWeight,
-          element.fontStyle
-        );
-
-      const requestedSize =
-        (element.fontSize || 14) *
-        Math.min(
-          scaleX,
-          scaleY
-        );
-
-      const minSize =
-        (element as any)
-          .minFontSize || 8;
-
-      let fontSize =
-        requestedSize;
-
-      const autoFit =
-        (element as any)
-          .autoFit === true;
-
-      if (autoFit) {
-        fontSize =
-          getAutoFitFontSize(
-            textContent,
-            font,
-            requestedSize,
-            minSize,
-            elWidth - 8
           );
       }
 
@@ -729,60 +1099,16 @@ export async function generatePDF(
           element.color
         );
 
-      let lines =
-        wrapText(
-          textContent,
-          elWidth - 8,
-          font,
-          fontSize
-        );
-
-      let lineHeight =
-        (element.lineHeight ||
-          1.2) *
-        fontSize;
-
-      /*
-       * If text is taller than
-       * its element, reduce it.
-       */
-      const maxTextHeight =
-        elHeight;
-
-      while (
-        lines.length *
-          lineHeight >
-          maxTextHeight &&
-        fontSize >
-          minSize
-      ) {
-        fontSize -= 1;
-
-        lineHeight =
-          (element.lineHeight ||
-            1.2) *
-          fontSize;
-
-        lines =
-          wrapText(
-            textContent,
-            elWidth - 8,
-            font,
-            fontSize
-          );
-      }
-
       lines.forEach(
         (
-          line,
-          index
+          line: string,
+          index: number
         ) => {
-          const lineY =
-            elY -
-            fontSize *
-              0.8 -
-            index *
-              lineHeight;
+          if (
+            line === ''
+          ) {
+            return;
+          }
 
           const lineWidth =
             font.widthOfTextAtSize(
@@ -791,15 +1117,15 @@ export async function generatePDF(
             );
 
           let drawX =
-            elX + 4;
+            x + 4;
 
           if (
             element.align ===
             'center'
           ) {
             drawX =
-              elX +
-              (elWidth -
+              x +
+              (width -
                 lineWidth) /
                 2;
           } else if (
@@ -807,22 +1133,32 @@ export async function generatePDF(
             'right'
           ) {
             drawX =
-              elX +
-              elWidth -
+              x +
+              width -
               lineWidth -
               4;
           }
 
+          const lineY =
+            topY -
+            fontSize *
+              0.8 -
+            index *
+              lineHeight;
+
           if (
-            lineY > 0 &&
-            lineY < pdfHeight
+            lineY >
+              0 &&
+            lineY <
+              pdfHeight
           ) {
             page.drawText(
               line,
               {
                 x: drawX,
                 y: lineY,
-                size: fontSize,
+                size:
+                  fontSize,
                 font,
                 color,
               }
@@ -832,32 +1168,33 @@ export async function generatePDF(
       );
     }
 
-    /* ----------------------------------------------
-       IMAGE
-    ---------------------------------------------- */
+    /* ===================================================
+       IMAGE ELEMENT
+    =================================================== */
 
     else if (
-      element.type === 'image'
+      element.type ===
+      'image'
     ) {
       try {
-        if (
-          typeof element.src !==
-          'string'
-        ) {
-          continue;
-        }
+        const src =
+          String(
+            element.src ||
+              ''
+          );
 
-        /*
-         * Currently supports data URLs.
-         */
         if (
-          !element.src.includes(',')
+          !src.includes(
+            ','
+          )
         ) {
           continue;
         }
 
         const parts =
-          element.src.split(',');
+          src.split(
+            ','
+          );
 
         const mime =
           parts[0]
@@ -871,34 +1208,76 @@ export async function generatePDF(
             'base64'
           );
 
-        let image;
+        let image:
+          | any
+          | undefined;
 
         if (
-          mime.includes('png')
+          mime.includes(
+            'png'
+          )
         ) {
           image =
             await pdfDoc.embedPng(
               imgBytes
             );
-        } else {
+        } else if (
+          mime.includes(
+            'jpeg'
+          ) ||
+          mime.includes(
+            'jpg'
+          )
+        ) {
           image =
             await pdfDoc.embedJpg(
               imgBytes
             );
         }
 
+        if (
+          !image
+        ) {
+          continue;
+        }
+
+        const x =
+          Number(
+            element.x || 0
+          ) * scaleX;
+
+        const width =
+          Number(
+            element.width ||
+              200
+          ) * scaleX;
+
+        const height =
+          Number(
+            element.height ||
+              100
+          ) * scaleY;
+
+        const y =
+          pdfHeight -
+          Number(
+            element.y || 0
+          ) *
+            scaleY -
+          height;
+
         page.drawImage(
           image,
           {
-            x: elX,
-            y:
-              elY -
-              elHeight,
-            width: elWidth,
-            height: elHeight,
+            x,
+            y,
+            width,
+            height,
           }
         );
-      } catch (error) {
+      } catch (
+        error
+      ) {
         console.error(
           'Image element error:',
           error
@@ -906,22 +1285,42 @@ export async function generatePDF(
       }
     }
 
-    /* ----------------------------------------------
-       SHAPE
-    ---------------------------------------------- */
+    /* ===================================================
+       SHAPE ELEMENT
+    =================================================== */
 
     else if (
-      element.type === 'shape'
+      element.type ===
+      'shape'
     ) {
+      const x =
+        Number(
+          element.x || 0
+        ) * scaleX;
+
+      const width =
+        Number(
+          element.width ||
+            200
+        ) * scaleX;
+
+      const height =
+        Number(
+          element.height ||
+            40
+        ) * scaleY;
+
+      const topY =
+        pdfHeight -
+        Number(
+          element.y || 0
+        ) * scaleY;
+
       const color =
         parseColor(
           element.fillColor ||
             '#000000'
         );
-
-      const drawY =
-        elY -
-        elHeight;
 
       if (
         element.shapeType ===
@@ -930,24 +1329,23 @@ export async function generatePDF(
         page.drawLine(
           {
             start: {
-              x: elX,
-              y: elY,
+              x,
+              y: topY,
             },
 
             end: {
               x:
-                elX +
-                elWidth,
-              y: elY,
+                x +
+                width,
+              y: topY,
             },
 
             thickness:
-              (element.thickness ||
-                2) *
-              Math.min(
-                scaleX,
-                scaleY
-              ),
+              Number(
+                element.thickness ||
+                  2
+              ) *
+              uniformScale,
 
             color:
               parseColor(
@@ -959,10 +1357,12 @@ export async function generatePDF(
       } else {
         page.drawRectangle(
           {
-            x: elX,
-            y: drawY,
-            width: elWidth,
-            height: elHeight,
+            x,
+            y:
+              topY -
+              height,
+            width,
+            height,
             color,
           }
         );
@@ -973,9 +1373,9 @@ export async function generatePDF(
   return await pdfDoc.save();
 }
 
-/* --------------------------------------------------
+/* =========================================================
    SAVE PDF TO SUPABASE STORAGE
--------------------------------------------------- */
+========================================================= */
 
 export async function saveStudentPDF(
   template: Template,
@@ -990,9 +1390,16 @@ export async function saveStudentPDF(
     );
 
   const safeName =
-    (student.name || 'student')
+    (
+      student.name ||
+      'student'
+    )
       .replace(
         /[^a-zA-Z0-9]/g,
+        '_'
+      )
+      .replace(
+        /_+/g,
         '_'
       );
 
@@ -1006,45 +1413,57 @@ export async function saveStudentPDF(
     );
 
   /*
-   * Use userId when available.
-   *
-   * If your Student type doesn't
-   * currently contain userId, the
-   * fallback still keeps the file
-   * inside the campaign directory.
+   * Prefer userId if it exists.
    */
   const userFolder =
-    (student as any).userId ||
-    'users';
+    String(
+      (student as any)
+        .userId ||
+        'users'
+    );
+
+  const campaignFolder =
+    String(
+      student.campaignId ||
+        'campaign'
+    );
 
   const storagePath =
-    `${userFolder}/${student.campaignId}/${safeName}_${safeCertId}.pdf`;
+    `${userFolder}/${campaignFolder}/${safeName}_${safeCertId}.pdf`;
 
   /*
-   * Upload PDF directly from memory.
+   * IMPORTANT:
    *
-   * NO fs.mkdir()
-   * NO fs.writeFile()
-   * NO process.cwd()
-   * NO /data directory
+   * No local filesystem is used.
+   *
+   * This works on Vercel because
+   * the certificate goes directly
+   * to Supabase Storage.
    */
   const {
     error,
   } =
     await supabaseAdmin.storage
-      .from('certificates')
+      .from(
+        'certificates'
+      )
       .upload(
         storagePath,
-        Buffer.from(pdfBytes),
+        Buffer.from(
+          pdfBytes
+        ),
         {
           contentType:
             'application/pdf',
 
-          upsert: true,
+          upsert:
+            true,
         }
       );
 
-  if (error) {
+  if (
+    error
+  ) {
     console.error(
       'Supabase certificate upload error:',
       error
@@ -1058,9 +1477,9 @@ export async function saveStudentPDF(
   return storagePath;
 }
 
-/* --------------------------------------------------
-   DOWNLOAD PDF FROM SUPABASE STORAGE
--------------------------------------------------- */
+/* =========================================================
+   DOWNLOAD STORED PDF
+========================================================= */
 
 export async function getStoredStudentPDF(
   storagePath: string
@@ -1079,7 +1498,9 @@ export async function getStoredStudentPDF(
     error,
   } =
     await supabaseAdmin.storage
-      .from('certificates')
+      .from(
+        'certificates'
+      )
       .download(
         storagePath
       );
@@ -1088,6 +1509,11 @@ export async function getStoredStudentPDF(
     error ||
     !data
   ) {
+    console.error(
+      'Supabase certificate download error:',
+      error
+    );
+
     throw new Error(
       `Failed to download certificate: ${
         error?.message ||
